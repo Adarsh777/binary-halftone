@@ -8,6 +8,7 @@ import { drawHalftone, type HalftoneSourceMedia } from "./halftone";
 import { applyHalftoneMediaTransform } from "./halftone-field";
 import { decodeHalftoneImage } from "./halftone-media";
 import { computeHalftoneRenderPlan } from "./halftone-render";
+import { applyHalftoneBackgroundOverride } from "./halftone-tokens";
 
 const SOURCE_IMAGE_TARGET = "source.image";
 
@@ -22,10 +23,11 @@ function makeBlankCanvas(): HTMLCanvasElement {
   return document.createElement("canvas");
 }
 
-function downloadCanvasAsPng(canvas: HTMLCanvasElement, fileName: string): void {
+function downloadCanvasImage(canvas: HTMLCanvasElement, format: string | undefined): void {
+  const isJpg = format === "jpg";
   const anchor = document.createElement("a");
-  anchor.href = canvas.toDataURL("image/png");
-  anchor.download = fileName;
+  anchor.href = isJpg ? canvas.toDataURL("image/jpeg", 0.92) : canvas.toDataURL("image/png");
+  anchor.download = isJpg ? "halftone.jpg" : "halftone.png";
   anchor.click();
 }
 
@@ -63,7 +65,7 @@ export async function exportHalftonePng({
       drawHalftone(
         off,
         field,
-        includeBackground ? tokens : { ...tokens, bg: "transparent" },
+        applyHalftoneBackgroundOverride(tokens, includeBackground),
         { dpr: pixelRatio, makeCanvas: makeOffscreenCanvas, setStyleSize: false },
       );
       context.drawImage(off, 0, 0, cssWidth, cssHeight);
@@ -72,7 +74,7 @@ export async function exportHalftonePng({
     state,
   });
 
-  downloadCanvasAsPng(exportCanvas, "halftone.png");
+  downloadCanvasImage(exportCanvas, state.values["export.image.format"] as string | undefined);
 }
 
 export function copyHalftoneTokens({ state }: ToolcraftPanelActionContext): Promise<void> {

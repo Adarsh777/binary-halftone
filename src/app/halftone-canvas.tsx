@@ -8,6 +8,7 @@ import { drawHalftone, type HalftoneSourceMedia } from "./halftone";
 import { applyHalftoneMediaTransform } from "./halftone-field";
 import { decodeHalftoneImage } from "./halftone-media";
 import { computeHalftoneRenderPlan } from "./halftone-render";
+import { applyHalftoneBackgroundOverride } from "./halftone-tokens";
 
 const SOURCE_IMAGE_TARGET = "source.image";
 const RENDER_SCALE_TARGET = "canvas.renderScale";
@@ -114,7 +115,7 @@ export function HalftoneCanvas(): React.JSX.Element {
     drawHalftone(
       canvas,
       field,
-      includeBackground ? tokens : { ...tokens, bg: "transparent" },
+      applyHalftoneBackgroundOverride(tokens, includeBackground),
       { dpr, makeCanvas: makeOffscreenCanvas },
     );
   });

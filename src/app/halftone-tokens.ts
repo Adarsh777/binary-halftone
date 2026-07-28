@@ -66,6 +66,14 @@ export function shouldIncludeHalftoneBackground(
   return bool(values, "export.includeBackground", fallback);
 }
 
+/* Background is a fillRect the engine already draws every redraw (tokens.bg);
+   excluding it only swaps that fill color to transparent, matching the
+   runtime's shouldIncludeToolcraftPreviewBackground/PNG-export contract
+   without touching drawHalftone itself. */
+export function applyHalftoneBackgroundOverride(tokens: Tokens, includeBackground: boolean): Tokens {
+  return includeBackground ? tokens : { ...tokens, bg: "transparent" };
+}
+
 export function getHalftonePlacement(values: HalftoneRuntimeValues): {
   fit: "contain" | "cover" | "stretch";
   panX: number;
