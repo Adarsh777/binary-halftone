@@ -25,6 +25,11 @@ async function dragToolcraftSliderInField(
   const sliderValues = field.getByRole("slider");
 
   await expect(slider, `Toolcraft slider "${description}" should be visible`).toBeVisible();
+  /* page.mouse.move/down/up dispatch at absolute page coordinates and do not
+     auto-scroll like Playwright locator actions do, so a slider below the
+     controls panel's scrolled fold silently receives a drag gesture at
+     coordinates outside the viewport (elementFromPoint there is null). */
+  await slider.scrollIntoViewIfNeeded();
 
   const box = await slider.boundingBox();
   if (!box) {
