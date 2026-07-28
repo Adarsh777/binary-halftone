@@ -13,12 +13,14 @@ import {
   getToolcraftControlFieldByTarget,
 } from "./browser-control-target-helpers";
 import { clickToolcraftPanelActionByLabel } from "./performance-output-action-helpers";
+import { dragToolcraftSliderByTarget } from "./performance-slider-helpers";
 import {
   expectToolcraftProductObservableToChange,
   getToolcraftProductObservableSnapshot,
 } from "./product-observable-helpers";
 import {
   applyHalftoneControlChange,
+  createGradientFixturePng,
   createOrientedFixturePng,
   createSmallFixturePng,
   HALFTONE_CONTROL_CONFIGS,
@@ -93,7 +95,20 @@ for (const config of HALFTONE_CONTROL_CONFIGS) {
       if (!config.requiresSourceMode) {
         await selectHalftoneGateOption(page, "source.mode", "Image");
       }
-      await uploadHalftoneFixtureImage(page);
+      await uploadHalftoneFixtureImage(
+        page,
+        config.requiresLuminanceGradientFixture ? createGradientFixturePng() : undefined,
+      );
+
+      if (config.requiresLuminanceGradientFixture) {
+        /* readKeyField only reads real RGB luminance when the canvas has no
+           transparent pixels; any letterboxed border (any fit at the
+           default zoom < 1) makes it fall back to reading alpha, collapsing
+           the mask to a flat opaque-rectangle-vs-border shape. Cover fit +
+           zoom >= 1 guarantees full-bleed coverage. */
+        await selectHalftoneGateOption(page, "placement.fit", "Cover");
+        await dragToolcraftSliderByTarget(page, "placement.zoom", 1);
+      }
     }
 
     await expectToolcraftProductObservableToChange(

@@ -187,11 +187,10 @@ export const appSchema = defineToolcraft({
               performanceReason:
                 "Dome radius changes the box-blur kernel radius applied across the full key-field resolution.",
               performanceRole: "workload",
-              sliderValueKind: "discrete",
+              sliderValueKind: "continuous",
               step: 1,
               target: "silhouette.domeRadius",
               type: "slider",
-              variant: "discrete",
             },
             relief: {
               defaultValue: 2.2,
