@@ -1,10 +1,40 @@
-node_modules/
-dist/
-.vercel/
-.DS_Store
-*.local
-.env*
-!.env.example
+# Dependencies
+node_modules
 
+# Vercel
 .vercel
-.env*
+
+# Build output
+dist
+dist-ssr
+.vite
+.turbo
+.output
+.next
+*.tsbuildinfo
+
+# Test output
+coverage
+test-results
+playwright-report
+
+# Local environment
+.env
+.env.*
+!.env.example
+.toolcraft
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
