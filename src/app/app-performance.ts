@@ -17,12 +17,17 @@ import {
    image is the app's real heaviest starting state regardless of which other
    control is under test. */
 const HEAVY_BASELINE_MEDIA = { height: 2160, width: 3840 };
-const HEAVY_BASELINE_WORKLOAD_FIXTURE = {
-  kind: "media" as const,
-  reason:
-    "A 4K-equivalent uploaded source is the app's heaviest realistic starting state and raises decode + per-cell sampling cost independently of any single control under test.",
-  value: HEAVY_BASELINE_MEDIA,
-};
+const SMALL_BASELINE_MEDIA = { height: 64, width: 64 };
+
+function buildHeavyBaselineWorkloadFixture(target: string) {
+  return {
+    kind: "media" as const,
+    loadProfile: fullyGuaranteedLoadProfile(target, "media-area", HEAVY_BASELINE_MEDIA),
+    reason:
+      "A 4K-equivalent uploaded source is the app's heaviest realistic starting state and raises decode + per-cell sampling cost independently of any single control under test.",
+    value: HEAVY_BASELINE_MEDIA,
+  };
+}
 
 type SliderHardLimit = { direction: "max" | "min"; value: number };
 
@@ -108,7 +113,7 @@ function buildControlScenario(config: HalftoneControlConfig): ToolcraftPerforman
         reason: `${sliderLimit.value} is the schema-declared ${sliderLimit.direction === "max" ? "maximum" : "minimum"} for ${config.label}, the heaviest useful value.`,
         value: sliderLimit.value,
       },
-      workloadFixture: HEAVY_BASELINE_WORKLOAD_FIXTURE,
+      workloadFixture: buildHeavyBaselineWorkloadFixture(config.target),
     } as ToolcraftPerformanceScenario;
   }
 
@@ -122,7 +127,8 @@ function buildControlScenario(config: HalftoneControlConfig): ToolcraftPerforman
         reason: "The P&L character set has the most distinct glyphs (18), maximizing ink-coverage measurement and ramp combinations.",
         value: heaviest,
       },
-      workloadFixture: HEAVY_BASELINE_WORKLOAD_FIXTURE,
+      values: { default: "01", max: heaviest, min: "0" },
+      workloadFixture: buildHeavyBaselineWorkloadFixture(config.target),
     } as ToolcraftPerformanceScenario;
   }
 
@@ -137,7 +143,7 @@ function buildControlScenario(config: HalftoneControlConfig): ToolcraftPerforman
       reason: `"${heaviestOption}" is the heaviest realistic ${config.label} choice for this product.`,
       value: optionValue,
     },
-    workloadFixture: HEAVY_BASELINE_WORKLOAD_FIXTURE,
+    workloadFixture: buildHeavyBaselineWorkloadFixture(config.target),
   } as ToolcraftPerformanceScenario;
 }
 
@@ -191,8 +197,40 @@ const SELECT_STRESS_VALUE_BY_TARGET: Record<string, string> = {
   "source.mode": "bitmap",
 };
 
-const CONTROL_SCENARIOS: readonly ToolcraftPerformanceScenario[] =
-  HALFTONE_CONTROL_CONFIGS.map(buildControlScenario);
+/* getHalftoneControlConfig("source.image") already gets a media-import scenario
+   above (the real upload gesture). The performance framework's generic
+   per-target workload check only recognizes control-change/control-drag/
+   export-copy interactions, so this second scenario proves the same
+   target's min/default/max size range independently of the upload gesture
+   itself (e.g. comparing a small vs. large already-uploaded source). */
+const SOURCE_IMAGE_RANGE_SCENARIO: ToolcraftPerformanceScenario = {
+  automated: true,
+  automatedTestName: getHalftoneEngineTestName("source.image"),
+  browser: true,
+  browserTestName: "browser perf: source.image size range stays within budget",
+  budget: { maxFrameGapMs: 33, maxInteractionMs: 180 },
+  controlLabel: "Image",
+  expectedObservable:
+    "Product output canvas stays within budget across small and large already-uploaded source sizes.",
+  fixture: "Compare a 64x64 uploaded source against a 3840x2160 uploaded source at the same control state.",
+  id: "source.image.range",
+  interaction: "control-change",
+  stressFixture: {
+    kind: "media",
+    loadProfile: fullyGuaranteedLoadProfile("source.image", "media-area", HEAVY_BASELINE_MEDIA),
+    reason: "A 4K-equivalent uploaded source is the heaviest realistic media size for Silhouette/Image modes.",
+    value: HEAVY_BASELINE_MEDIA,
+  },
+  target: "source.image",
+  values: { default: SMALL_BASELINE_MEDIA, max: HEAVY_BASELINE_MEDIA, min: SMALL_BASELINE_MEDIA },
+  workload: true,
+  workloadFixture: buildHeavyBaselineWorkloadFixture("source.image"),
+} as ToolcraftPerformanceScenario;
+
+const CONTROL_SCENARIOS: readonly ToolcraftPerformanceScenario[] = [
+  ...HALFTONE_CONTROL_CONFIGS.map(buildControlScenario),
+  SOURCE_IMAGE_RANGE_SCENARIO,
+];
 
 const RENDERER_LEVEL_SCENARIOS: readonly ToolcraftPerformanceScenario[] = [
   {
@@ -229,6 +267,18 @@ const RENDERER_LEVEL_SCENARIOS: readonly ToolcraftPerformanceScenario[] = [
         sourceMedia: HEAVY_BASELINE_MEDIA,
         sourceMode: "inflate",
       },
+    },
+    values: {
+      default: { cellAspect: 1.35, cellWidth: 16, characterSet: "binary", sizeSteps: 3, sourceMode: "scene" },
+      max: {
+        cellAspect: 0.8,
+        cellWidth: 3,
+        characterSet: "pnl",
+        sizeSteps: 6,
+        sourceMedia: HEAVY_BASELINE_MEDIA,
+        sourceMode: "inflate",
+      },
+      min: { cellAspect: 2.2, cellWidth: 40, characterSet: "binary", sizeSteps: 1, sourceMode: "scene" },
     },
     workload: true,
   },
@@ -272,6 +322,11 @@ const RENDERER_LEVEL_SCENARIOS: readonly ToolcraftPerformanceScenario[] = [
         sizeSteps: 6,
         sourceMedia: HEAVY_BASELINE_MEDIA,
       },
+    },
+    values: {
+      default: { cellWidth: 16, sizeSteps: 3 },
+      max: { cellWidth: 3, sizeSteps: 6, sourceMedia: HEAVY_BASELINE_MEDIA },
+      min: { cellWidth: 40, sizeSteps: 1 },
     },
     workload: true,
   },
@@ -378,7 +433,7 @@ export const appPerformance: ToolcraftPerformanceConfig = defineToolcraftPerform
         interaction: "control-drag",
         invalidates: ["build-ramp", "rasterize-glyphs"],
         mustNotInvalidate: ["build-field", "decode-media", "transform-media"],
-        targets: ["character.variety", "character.sizeVariation", "character.sizeSteps"],
+        targets: ["character.variety", "character.sizeVariation", "character.sizeSteps", "tone.steps"],
       },
       {
         interaction: "control-change",
