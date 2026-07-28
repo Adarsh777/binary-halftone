@@ -6,7 +6,12 @@ import {
   expectToolcraftAcceptanceOutcome,
   expectToolcraftExportedArtifact,
 } from "./browser-acceptance-outcome-helpers";
-import { expectToolcraftMediaLifecycle, expectToolcraftPersistenceState } from "./browser-state-evidence-helpers";
+import { expectToolcraftPersistenceState } from "./browser-state-evidence-helpers";
+import { attachToolcraftBrowserRuntimeEvidence } from "./browser-runtime-evidence";
+import {
+  countToolcraftControlOwnersByTarget,
+  getToolcraftControlFieldByTarget,
+} from "./browser-control-target-helpers";
 import { clickToolcraftPanelActionByLabel } from "./performance-output-action-helpers";
 import {
   expectToolcraftProductObservableToChange,
@@ -14,6 +19,7 @@ import {
 } from "./product-observable-helpers";
 import {
   applyHalftoneControlChange,
+  createOrientedFixturePng,
   createSmallFixturePng,
   HALFTONE_CONTROL_CONFIGS,
   selectHalftoneGateOption,
@@ -80,6 +86,13 @@ for (const config of HALFTONE_CONTROL_CONFIGS) {
     }
 
     if (config.requiresMedia) {
+      /* source.image is itself visibleWhen source.mode !== "scene", so a
+         control whose own config only declares requiresMedia (no
+         requiresSourceMode gate of its own, e.g. source.mode) must first
+         reveal the fileDrop before it can be uploaded into. */
+      if (!config.requiresSourceMode) {
+        await selectHalftoneGateOption(page, "source.mode", "Image");
+      }
       await uploadHalftoneFixtureImage(page);
     }
 
@@ -93,29 +106,136 @@ for (const config of HALFTONE_CONTROL_CONFIGS) {
   });
 }
 
-test("browser: source.image media lifecycle covers upload and remove", async ({ page }) => {
+/* Media lifecycle for source.image (an image fileDrop control): upload only
+   changes rendered output once source.mode reads media (Image/Silhouette),
+   since Scene mode never looks at mediaAssets. Rotate/flip are the runtime's
+   built-in FileDrop image-transform actions (aria-labels "90° Right"/"Flip
+   horizontal"), which bake into media.transform and are consumed by
+   halftone-image.ts's placeImage before the engine samples the source.
+   Reset uses the per-section reset button, which clears both control
+   values and any media whose sourceTarget is in that section. */
+test("browser: source.image lifecycle covers upload, rotate, flip, remove, and reset", async ({
+  page,
+}) => {
   await page.goto("/");
   const session = await createToolcraftBrowserProofSession(page);
+  await selectHalftoneGateOption(page, "source.mode", "Image");
 
-  const observeLifecycle = session.observe((root) => {
-    const images = Array.from(
-      root.querySelectorAll('[data-toolcraft-control-target="source.image"] img'),
-    );
-    const canvas = root.querySelector("[data-toolcraft-product-output]");
-    return {
-      itemIds: images.map((image, index) => image.getAttribute("alt") ?? `image-${index}`),
-      outputSignature: canvas ? canvas.outerHTML.length.toString() : "0",
-    };
-  });
-
-  await expectToolcraftMediaLifecycle(
-    observeLifecycle,
-    session.action(async () => {
-      await uploadHalftoneFixtureImage(page);
+  await expectToolcraftProductObservableToChange(
+    session,
+    session.controlAction("source.image", async () => {
+      await uploadHalftoneFixtureImage(page, createOrientedFixturePng());
     }),
-    { itemIds: ["halftone-fixture.png"], outputSignature: "" },
     { requirementId: "source.image.upload" },
   );
+  await expect(page.getByRole("img", { name: "halftone-fixture.png" })).toBeVisible();
+  await attachToolcraftBrowserRuntimeEvidence({
+    evidenceType: "media-lifecycle",
+    requirementId: "source.image.upload",
+    target: "source.image",
+  });
+
+  const field = await getToolcraftControlFieldByTarget(page, "source.image");
+
+  await expectToolcraftProductObservableToChange(
+    session,
+    session.controlAction("source.image", async () => {
+      await field.getByRole("button", { name: "90° Right" }).click();
+    }),
+    { requirementId: "source.image.rotate" },
+  );
+  await attachToolcraftBrowserRuntimeEvidence({
+    evidenceType: "media-lifecycle",
+    requirementId: "source.image.rotate",
+    target: "source.image",
+  });
+
+  await expectToolcraftProductObservableToChange(
+    session,
+    session.controlAction("source.image", async () => {
+      await field.getByRole("button", { name: "Flip horizontal" }).click();
+    }),
+    { requirementId: "source.image.flip" },
+  );
+  await attachToolcraftBrowserRuntimeEvidence({
+    evidenceType: "media-lifecycle",
+    requirementId: "source.image.flip",
+    target: "source.image",
+  });
+
+  await expectToolcraftProductObservableToChange(
+    session,
+    session.controlAction("source.image", async () => {
+      await field.getByRole("button", { name: "Remove image" }).click();
+    }),
+    { requirementId: "source.image.remove" },
+  );
+  await expect(page.getByRole("img", { name: "halftone-fixture.png" })).toHaveCount(0);
+  await attachToolcraftBrowserRuntimeEvidence({
+    evidenceType: "media-lifecycle",
+    requirementId: "source.image.remove",
+    target: "source.image",
+  });
+
+  await uploadHalftoneFixtureImage(page);
+  await expect(page.getByRole("img", { name: "halftone-fixture.png" })).toBeVisible();
+
+  await expectToolcraftProductObservableToChange(
+    session,
+    session.controlAction("source.image", async (_control, currentPage) => {
+      await currentPage.getByRole("button", { name: "Reset Source section" }).click();
+    }),
+    { requirementId: "source.image.reset" },
+  );
+  await expect(page.getByRole("img", { name: "halftone-fixture.png" })).toHaveCount(0);
+  await attachToolcraftBrowserRuntimeEvidence({
+    evidenceType: "media-lifecycle",
+    requirementId: "source.image.reset",
+    target: "source.image",
+  });
+});
+
+/* source.scene/source.yaw/source.pitch are visibleWhen source.mode equals
+   "scene" -- the opposite gating direction from source.image (visible only
+   in Scene mode, hidden once a media-driven mode is selected). This proves
+   both directions for that shared gate. */
+test("browser: Shape/Yaw/Pitch hide once a media-driven source mode is selected", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const gatedTargets = ["source.scene", "source.yaw", "source.pitch"] as const;
+
+  for (const target of gatedTargets) {
+    expect(await countToolcraftControlOwnersByTarget(page, target)).toBe(1);
+    await attachToolcraftBrowserRuntimeEvidence({
+      evidenceType: "conditional-control-visible",
+      requirementId: `${target}.visibility`,
+      target,
+    });
+  }
+
+  await selectHalftoneGateOption(page, "source.mode", "Image");
+
+  for (const target of gatedTargets) {
+    expect(await countToolcraftControlOwnersByTarget(page, target)).toBe(0);
+    await attachToolcraftBrowserRuntimeEvidence({
+      evidenceType: "conditional-control-hidden",
+      requirementId: `${target}.visibility`,
+      target,
+    });
+  }
+
+  await selectHalftoneGateOption(page, "source.mode", "Scene");
+
+  for (const target of gatedTargets) {
+    expect(await countToolcraftControlOwnersByTarget(page, target)).toBe(1);
+    await attachToolcraftBrowserRuntimeEvidence({
+      evidenceType: "conditional-control-visible",
+      requirementId: `${target}.visibility`,
+      target,
+    });
+  }
 });
 
 test("browser: export.includeBackground hides the live preview background and produces a transparent PNG", async ({

@@ -1,3 +1,4 @@
+import { getHalftoneEngineTestName } from "./halftone-control-catalog";
 import type {
   ToolcraftComponentAcceptance,
   ToolcraftControlSectionInventoryEntry,
@@ -279,4 +280,89 @@ export const appControlSectionInventory: readonly ToolcraftControlSectionInvento
   },
 ] as const;
 
-export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [];
+export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
+  // ---------- Source ----------
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("source.mode"),
+    browser: true,
+    browserTestName: "browser: source.mode changes rendered output",
+    componentType: "select",
+    evidence: "product-output",
+    expectedObservable:
+      "Switching Mode between Scene, Silhouette, and Image swaps which per-cell field pipeline (raymarch, silhouette inflate, or bitmap luminance) drives the rendered glyph grid.",
+    fixture:
+      "Default product state with a small uploaded source image attached; select each Mode option from the combobox.",
+    id: "source.mode",
+    kind: "control",
+    optionCoverage: ["scene", "inflate", "bitmap"],
+    target: "source.mode",
+    userAction: "Open the Mode select and choose Scene, Silhouette, or Image.",
+  },
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("source.image"),
+    browser: true,
+    browserTestName: "browser: source.image lifecycle covers upload, rotate, flip, remove, and reset",
+    componentType: "fileDrop",
+    evidence: "media-lifecycle",
+    expectedObservable:
+      "Uploading an image attaches it as the Silhouette/Image source and changes the rendered glyph grid; rotate/flip update the baked media transform and visibly change the render; removing the image or resetting the Source section clears it and reverts output.",
+    fixture:
+      "Upload a real, decodable oriented PNG fixture (distinct quadrant colors so rotation/flip are observable) while Mode is Image; use the runtime's built-in rotate (\"90° Right\"), flip (\"Flip horizontal\"), remove (\"Remove image\"), and per-section Reset (\"Reset Source section\") actions.",
+    id: "source.image",
+    kind: "control",
+    mediaLifecycleCoverage: ["upload", "remove", "reset", "rotate", "flip", "transform-output"],
+    target: "source.image",
+    userAction:
+      "Drop or browse an image file into the Image control, then use its rotate/flip actions, its Remove action, or the Source section's Reset action.",
+    visibilityCoverage: "all-conditional-visibility",
+  },
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("source.scene"),
+    browser: true,
+    browserTestName: "browser: source.scene changes rendered output",
+    componentType: "select",
+    evidence: "product-output",
+    expectedObservable:
+      "Selecting a different Shape (Stack/Sphere/Torus/Blob) changes the raymarched distance field and the rendered glyph grid.",
+    fixture: "Default product state (Scene mode); select each Shape option from the combobox.",
+    id: "source.scene",
+    kind: "control",
+    optionCoverage: ["stack", "sphere", "torus", "blob"],
+    target: "source.scene",
+    userAction: "Open the Shape select and choose a different shape.",
+    visibilityCoverage: "all-conditional-visibility",
+  },
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("source.yaw"),
+    browser: true,
+    browserTestName: "browser: source.yaw changes rendered output",
+    componentType: "slider",
+    evidence: "product-output",
+    expectedObservable: "Dragging Yaw rotates the camera around the procedural scene, changing the rendered glyph grid.",
+    fixture: "Default product state (Scene mode); drag the Yaw slider.",
+    id: "source.yaw",
+    kind: "control",
+    target: "source.yaw",
+    userAction: "Drag the Yaw slider.",
+    visibilityCoverage: "all-conditional-visibility",
+  },
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("source.pitch"),
+    browser: true,
+    browserTestName: "browser: source.pitch changes rendered output",
+    componentType: "slider",
+    evidence: "product-output",
+    expectedObservable: "Dragging Pitch tilts the camera over the procedural scene, changing the rendered glyph grid.",
+    fixture: "Default product state (Scene mode); drag the Pitch slider.",
+    id: "source.pitch",
+    kind: "control",
+    target: "source.pitch",
+    userAction: "Drag the Pitch slider.",
+    visibilityCoverage: "all-conditional-visibility",
+  },
+];
