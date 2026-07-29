@@ -44,6 +44,31 @@ test("browser: app opens as a real Toolcraft product with the Source-to-Image Ex
   await expect(page.getByRole("button", { name: "Copy Tokens", exact: true })).toBeVisible();
 });
 
+/* referenceFeatureInventory feature-presets/feature-video-source document
+   two intentionally-dropped reference features. This proves the real UI
+   enforces both exclusions: the runtime's generic Settings Transfer (not
+   an app-authored named-preset system) is what actually appears, Mode has
+   no video option, and there is no video upload/scrub/record surface
+   anywhere in the controls panel. */
+test("browser: named presets and video-as-source stay excluded; Settings Transfer is the real replacement", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "Export Settings" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Import Settings" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /preset/i })).toHaveCount(0);
+
+  const modeField = await getToolcraftControlFieldByTarget(page, "source.mode");
+  await modeField.getByRole("combobox").click();
+  const optionLabels = await page.locator('[role="option"]').allTextContents();
+  expect(optionLabels.map((label) => label.trim())).toEqual(["Scene", "Silhouette", "Image"]);
+  await page.keyboard.press("Escape");
+
+  await expect(page.getByRole("button", { name: /video/i })).toHaveCount(0);
+  await expect(page.locator('input[type="file"][accept*="video"]')).toHaveCount(0);
+});
+
 /* One acceptance row per visible schema control target: proves the real
    interaction changes the rendered product-output canvas. Gated controls
    (Placement/Silhouette/Custom Characters) also prove their conditional

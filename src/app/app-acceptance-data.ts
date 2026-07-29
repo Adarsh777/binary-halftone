@@ -15,11 +15,11 @@ import type {
    - README.md (documented behavior for character mode, size axis, video path) */
 export const appTransferMode: ToolcraftTransferMode = {
   animationIntent: { mode: "none" },
-  behaviorCoverage: ["control-mapping", "canvas-sizing", "export-copy", "media-lifecycle"],
+  behaviorCoverage: ["control-mapping", "canvas-sizing", "export-copy", "media-lifecycle", "renderer-state"],
   mode: "reference-runtime-clone",
   referenceFeatureInventory: [
     {
-      acceptanceId: "source-scene",
+      acceptanceId: "source.scene",
       behaviorEvidence:
         "renderScene(W,H,{scene,yaw,pitch,rim,lightDir}) in src/app/halftone.ts is unchanged from src/halftone.js; only type annotations were added.",
       featureName: "Procedural scene source (raymarched sphere/torus/blob/stack)",
@@ -32,7 +32,7 @@ export const appTransferMode: ToolcraftTransferMode = {
         "schema controls source.scene/source.yaw/source.pitch (visibleWhen source.mode='scene'), consumed by buildHalftoneField() -> renderScene().",
     },
     {
-      acceptanceId: "source-silhouette",
+      acceptanceId: "silhouette.threshold",
       behaviorEvidence: "inflate()/readKeyField() unchanged; only type annotations were added.",
       featureName: "Silhouette inflate source (mask -> distance transform -> dome -> normals -> shade)",
       id: "feature-source-inflate",
@@ -44,7 +44,7 @@ export const appTransferMode: ToolcraftTransferMode = {
         "schema section Silhouette (silhouette.threshold/invert/showMask/domeRadius/relief/occlusion), visibleWhen source.mode='inflate'.",
     },
     {
-      acceptanceId: "source-bitmap",
+      acceptanceId: "source.mode",
       behaviorEvidence: "fieldFromImage() unchanged; only type annotations were added.",
       featureName: "Bitmap luminance source",
       id: "feature-source-bitmap",
@@ -55,7 +55,7 @@ export const appTransferMode: ToolcraftTransferMode = {
       toolcraftMapping: "schema mode option 'bitmap' ('Image'), consumed by buildHalftoneField().",
     },
     {
-      acceptanceId: "character-ramp",
+      acceptanceId: "character.weight",
       behaviorEvidence: "buildRamp()/inkCoverage()/buildScaleAxis() unchanged; only type annotations were added.",
       featureName: "Tone-pooled character ramp (glyph/alpha/size combinations sampled by perceived ink)",
       id: "feature-character-ramp",
@@ -67,7 +67,7 @@ export const appTransferMode: ToolcraftTransferMode = {
         "schema section Character (character.mode/customChars/variety/size/sizeVariation/sizeSteps/weight) -> getHalftoneTokens() -> buildRamp().",
     },
     {
-      acceptanceId: "grid-derived",
+      acceptanceId: "grid.cellWidth",
       behaviorEvidence:
         "User-directed model change: cellWidth/cellAspect stay product controls; columns/rows are derived from the runtime canvas size instead of being separate controls or an autoFit toggle.",
       featureName: "Grid sizing (autoFit toggle + explicit columns/rows sliders)",
@@ -82,7 +82,7 @@ export const appTransferMode: ToolcraftTransferMode = {
         "Explicit user instruction for this migration: 'Grid model is already decided — do not re-derive it: keep cellWidth and cellAspect as product controls, and derive columns and rows from the runtime canvas size. Drop autoFit and fitGridToMedia; they no longer exist in this model.'",
     },
     {
-      acceptanceId: "media-upload",
+      acceptanceId: "source.image",
       behaviorEvidence:
         "fileDrop control (source.image) plus canvas.upload replace the custom <input type=file> + window dragover/drop listeners.",
       featureName: "Media upload (file input + window drag/drop)",
@@ -95,7 +95,7 @@ export const appTransferMode: ToolcraftTransferMode = {
         "schema fileDrop control target source.image (assetKind: image) plus canvas.upload:true; runtime owns upload UI, drag/drop routing, and mediaAssets state.",
     },
     {
-      acceptanceId: "export-png",
+      acceptanceId: "output.export-png",
       behaviorEvidence:
         "createToolcraftPngExportCanvas + shouldIncludeToolcraftPreviewBackground replace the custom canvas.toDataURL/anchor-download modal.",
       featureName: "PNG export with a scale selector (1x-4x)",
@@ -108,7 +108,7 @@ export const appTransferMode: ToolcraftTransferMode = {
         "Required runtime Image Export section (export.image.format/resolution: 2K/4K/8K) plus sticky Export PNG action; halftone-export.ts composites the unmodified engine output through createToolcraftPngExportCanvas.",
     },
     {
-      acceptanceId: "copy-tokens",
+      acceptanceId: "output.copy-tokens",
       behaviorEvidence: "copyHalftoneTokens() reuses the same tokens object shape as tokensFrom(), plus computed columns/rows.",
       featureName: "Copy tokens JSON to clipboard (for the offline asset-generation script)",
       id: "feature-copy-tokens",
@@ -118,7 +118,7 @@ export const appTransferMode: ToolcraftTransferMode = {
       toolcraftMapping: "sticky panelActions 'Copy Tokens' (value copy.tokens, role copy-output) -> copyHalftoneTokens().",
     },
     {
-      acceptanceId: "presets",
+      acceptanceId: "product.reference-exclusions",
       behaviorEvidence:
         "User-directed model change: 'preset transfer' is runtime-owned, i.e. Toolcraft's settingsTransfer (Export Settings/Import Settings) and localStorage persistence, not an app-authored named-preset system.",
       featureName: "Named presets (built-in + saved + share-link hash + import/export JSON)",
@@ -133,7 +133,7 @@ export const appTransferMode: ToolcraftTransferMode = {
         "Explicit user instruction for this migration listed 'preset transfer' among the app code that 'must move to Toolcraft runtime surfaces, not be reimplemented.'",
     },
     {
-      acceptanceId: "video-source",
+      acceptanceId: "product.reference-exclusions",
       behaviorEvidence: "Not implemented this pass; scoping question answered explicitly during this migration.",
       featureName: "Video-as-source (upload/scrub/record a video into the halftone renderer)",
       id: "feature-video-source",
@@ -157,7 +157,7 @@ export const appTransferMode: ToolcraftTransferMode = {
     sourceEvidence:
       "Full read of App.jsx (681 lines), src/app/halftone.ts (592 lines, the unmodified engine), video.js (100 lines), and README.md's documented behavior sections (Video, Character mode, size axis, asset generation).",
     sourceOnlyReason:
-      "The reference app's controls panel is rendered by the `dialkit` package, a UI library outside this migration's scope; restoring it would exercise DialKit's own rendering, not the halftone behavior being ported.",
+      "The reference app's controls panel cannot be run or restored in this Toolcraft port: it is rendered by the `dialkit` package, a UI library that is unavailable/out of scope here, and restoring it would exercise DialKit's own rendering, not the halftone behavior being ported.",
     status: "source-inspection-only",
   },
   referenceTimeline: {
@@ -300,6 +300,7 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     id: "source.mode",
     kind: "control",
     optionCoverage: ["scene", "inflate", "bitmap"],
+    referenceCoverage: "control-mapping",
     target: "source.mode",
     userAction: "Open the Mode select and choose Scene, Silhouette, or Image.",
   },
@@ -317,6 +318,7 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     id: "source.image",
     kind: "control",
     mediaLifecycleCoverage: ["upload", "remove", "reset", "rotate", "flip", "transform-output"],
+    referenceCoverage: "media-lifecycle",
     target: "source.image",
     userAction:
       "Drop or browse an image file into the Image control, then use its rotate/flip actions, its Remove action, or the Source section's Reset action.",
@@ -335,6 +337,7 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     id: "source.scene",
     kind: "control",
     optionCoverage: ["stack", "sphere", "torus", "blob"],
+    referenceCoverage: "renderer-state",
     target: "source.scene",
     userAction: "Open the Shape select and choose a different shape.",
     visibilityCoverage: "all-conditional-visibility",
@@ -445,6 +448,7 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
       "Silhouette mode with an uploaded vertical grayscale gradient image at Cover fit and zoom >= 1 (full-bleed, no transparent letterbox, so the mask reads real RGB luminance instead of collapsing to alpha); drag the Threshold slider.",
     id: "silhouette.threshold",
     kind: "control",
+    referenceCoverage: "renderer-state",
     target: "silhouette.threshold",
     userAction: "Drag the Threshold slider.",
   },
@@ -630,6 +634,7 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     id: "character.weight",
     kind: "control",
     optionCoverage: ["300", "400", "500", "700"],
+    referenceCoverage: "control-mapping",
     target: "character.weight",
     userAction: "Open the Weight select and choose a different weight.",
   },
@@ -668,6 +673,7 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     fixture: "Default product state; drag the Cell Width slider.",
     id: "grid.cellWidth",
     kind: "control",
+    referenceCoverage: "canvas-sizing",
     target: "grid.cellWidth",
     userAction: "Drag the Cell Width slider.",
   },
@@ -793,5 +799,58 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     kind: "control",
     target: "appearance.ink",
     userAction: "Type a new hex value into the Ink field.",
+  },
+
+  // ---------- Reference-clone bundle (runtime, not tied to one control section) ----------
+  // referenceFeatureInventory items point their acceptanceId at these (and
+  // at the control-level rows above tagged with referenceCoverage) so every
+  // declared appTransferMode.behaviorCoverage value traces to real,
+  // passing evidence instead of a dangling id.
+  {
+    automated: true,
+    automatedTestName:
+      "engine: the sticky Export section exposes Export PNG and Copy Tokens actions",
+    browser: true,
+    browserTestName: "browser: Export PNG downloads a real decodable PNG",
+    componentType: "panelActions",
+    evidence: "exported-bytes",
+    expectedObservable: "Clicking Export PNG downloads a real, decodable PNG file at the requested resolution.",
+    fixture: "Default product state; click Export PNG and decode the downloaded file's PNG header.",
+    id: "output.export-png",
+    kind: "runtime",
+    referenceCoverage: "export-copy",
+    userAction: "Click the sticky Export PNG action.",
+  },
+  {
+    automated: true,
+    automatedTestName:
+      "engine: the sticky Export section exposes Export PNG and Copy Tokens actions",
+    browser: true,
+    browserTestName: "browser: Copy Tokens writes the current engine token set to the clipboard",
+    componentType: "panelActions",
+    evidence: "command-side-effect",
+    expectedObservable: "Clicking Copy Tokens writes the current engine token JSON to the clipboard.",
+    fixture: "Default product state; click Copy Tokens and read the clipboard contents back.",
+    id: "output.copy-tokens",
+    kind: "runtime",
+    referenceCoverage: "export-copy",
+    userAction: "Click the sticky Copy Tokens action.",
+  },
+  {
+    automated: true,
+    automatedTestName:
+      "enforces the two intentionally-dropped reference features (referenceFeatureInventory feature-presets/feature-video-source)",
+    browser: true,
+    browserTestName:
+      "browser: named presets and video-as-source stay excluded; Settings Transfer is the real replacement",
+    componentType: "settingsTransfer",
+    evidence: "product-output",
+    expectedObservable:
+      "The runtime's generic Export/Import Settings buttons are the only settings-transfer surface (no app-authored preset UI), Mode has exactly its three ported options with no video choice, and no video upload/scrub/record control exists anywhere in the panel.",
+    fixture: "Default product state; inspect the Setup section's Settings Transfer buttons, the Mode options list, and search the panel for any preset/video control.",
+    id: "product.reference-exclusions",
+    kind: "runtime",
+    referenceCoverage: "control-mapping",
+    userAction: "Open the Mode select; look for preset or video controls anywhere in the panel.",
   },
 ];

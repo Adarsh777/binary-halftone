@@ -99,4 +99,26 @@ describe("appSchema", () => {
     expect(appPerformance.rendererPipeline?.passes.length).toBeGreaterThan(0);
     expect(appPerformance.rendererPipeline?.interactionInvalidation.length).toBeGreaterThan(0);
   });
+
+  it("enforces the two intentionally-dropped reference features (referenceFeatureInventory feature-presets/feature-video-source)", () => {
+    // Video-as-source was scoped out: source.mode has exactly the three
+    // ported modes, never a fourth video option.
+    const modeControl = appSchema.panels.controls?.sections
+      .flatMap((section) => Object.values(section.controls))
+      .find((control) => control.target === "source.mode");
+    expect(modeControl?.options?.map((option) => option.value)).toEqual(["scene", "inflate", "bitmap"]);
+
+    // Named presets were replaced by the runtime's generic Settings
+    // Transfer, not an app-authored preset system: no control target
+    // implements its own preset store, and the replacement control is real.
+    const allTargets = appSchema.panels.controls?.sections.flatMap((section) =>
+      Object.values(section.controls).map((control) => control.target),
+    );
+    expect(allTargets?.some((target) => /preset/i.test(target))).toBe(false);
+    const settingsTransferControl = appSchema.panels.controls?.sections[0]?.controls.settingsTransfer;
+    expect(settingsTransferControl).toMatchObject({
+      target: "runtime.settingsTransfer",
+      type: "settingsTransfer",
+    });
+  });
 });
