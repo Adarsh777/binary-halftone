@@ -71,6 +71,11 @@ for (const config of HALFTONE_CONTROL_CONFIGS) {
       );
     }
 
+    if (config.requiresSourceModeContext) {
+      const contextLabel = config.requiresSourceModeContext === "inflate" ? "Silhouette" : "Image";
+      await selectHalftoneGateOption(page, "source.mode", contextLabel);
+    }
+
     if (config.requiresCharacterMode) {
       await selectHalftoneGateOption(page, "character.mode", "Custom");
       await expectToolcraftConditionalControlVisibility(
@@ -90,9 +95,10 @@ for (const config of HALFTONE_CONTROL_CONFIGS) {
     if (config.requiresMedia) {
       /* source.image is itself visibleWhen source.mode !== "scene", so a
          control whose own config only declares requiresMedia (no
-         requiresSourceMode gate of its own, e.g. source.mode) must first
-         reveal the fileDrop before it can be uploaded into. */
-      if (!config.requiresSourceMode) {
+         requiresSourceMode/requiresSourceModeContext gate of its own, e.g.
+         source.mode) must first reveal the fileDrop before it can be
+         uploaded into. */
+      if (!config.requiresSourceMode && !config.requiresSourceModeContext) {
         await selectHalftoneGateOption(page, "source.mode", "Image");
       }
       await uploadHalftoneFixtureImage(
@@ -317,6 +323,88 @@ test("browser: the tone ramp renders a monotonic ink sweep across a full-range g
     bandInkCounts[bandInkCounts.length - 1],
     `The brightest band (bottom) must render more ink than the darkest band (top); bands top-to-bottom: ${bandInkCounts.join(", ")}.`,
   ).toBeGreaterThan(bandInkCounts[0]);
+});
+
+/* halftone-draw.ts's ordered-dither offset is tapered to zero within one
+   tone step of pure black/white (`smoothstep(0, step, L)` is exactly 0 at
+   L=0), specifically so a high Dither value can never lift a genuinely
+   background cell into a drawn glyph. A thin top band of a continuous
+   gradient still spans a small range of luminance approaching (not
+   exactly at) black, so some real, correctly-tapered ink near the far
+   edge of that band is expected -- asserting a flat "zero ink in this
+   band" would be wrong, not stricter. The real, sound proof is
+   differential: render the identical darkest band with Dither at 0 and
+   again at its schema maximum, and require identical ink -- proving
+   Dither made no difference right at the extreme, rather than guessing
+   how wide the unaffected band is. */
+test("browser: the dither taper holds pure black at the extreme, even at max Dither", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await selectHalftoneGateOption(page, "source.mode", "Image");
+  await uploadHalftoneFixtureImage(page, createGradientFixturePng());
+  await selectHalftoneGateOption(page, "placement.fit", "Cover");
+  await dragToolcraftSliderByTarget(page, "placement.zoom", 1);
+  await dragToolcraftSliderByTarget(page, "tone.blackPoint", 0);
+
+  const canvas = page.locator("[data-toolcraft-product-output]");
+  await expect(canvas).toBeVisible();
+
+  const countDarkestBandInkPixels = () =>
+    canvas.evaluate((element) => {
+      const canvasElement = element as HTMLCanvasElement;
+      const ctx = canvasElement.getContext("2d", { willReadFrequently: true })!;
+      const { width, height } = canvasElement;
+      // The gradient's darkest rows are at the top; a very thin band stays
+      // close to the true L=0 extreme this proof is about.
+      const bandHeight = Math.max(1, Math.floor(height * 0.01));
+      const { data } = ctx.getImageData(0, 0, width, bandHeight);
+      let inkPixels = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        const alpha = data[i + 3];
+        if (alpha > 10 && brightness > 60) inkPixels += 1;
+      }
+      return inkPixels;
+    });
+
+  await dragToolcraftSliderByTarget(page, "tone.dither", 0);
+  const withoutDither = await countDarkestBandInkPixels();
+
+  await dragToolcraftSliderByTarget(page, "tone.dither", 1);
+  const withMaxDither = await countDarkestBandInkPixels();
+
+  expect(
+    withMaxDither,
+    `Dither must not lift any cell in the darkest band from background to drawn: ${withoutDither} ink px at Dither=0 vs ${withMaxDither} ink px at Dither=1.`,
+  ).toBe(withoutDither);
+});
+
+/* tone.steps's schema minimum is 2 (buildRamp's n = max(2, round(steps)) -
+   1 collapses to a single level there, proven not to divide-by-zero or
+   NaN at the engine level in halftone-engine.test.ts). This proves the
+   real UI renders cleanly at that floor: dragging Levels to its minimum
+   must not error and must still produce a real, visibly different
+   two-tone-style render from the default. */
+test("browser: dragging Levels to its schema minimum (2) renders cleanly", async ({ page }) => {
+  const pageErrors: Error[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error));
+
+  await page.goto("/");
+  const session = await createToolcraftBrowserProofSession(page);
+
+  await expectToolcraftProductObservableToChange(
+    session,
+    session.controlAction("tone.steps", async () => {
+      await dragToolcraftSliderByTarget(page, "tone.steps", 0);
+    }),
+    { requirementId: "tone.steps.minimum" },
+  );
+
+  const field = await getToolcraftControlFieldByTarget(page, "tone.steps");
+  await expect(field.getByRole("slider")).toHaveAttribute("aria-valuenow", "2");
+  await expect(page.locator("[data-toolcraft-product-output]")).toBeVisible();
+  expect(pageErrors, `Dragging Levels to its minimum must not throw: ${pageErrors.join(", ")}`).toHaveLength(0);
 });
 
 /* The grid model is settled: grid.cellWidth/grid.cellAspect are the only
