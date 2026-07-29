@@ -15,6 +15,35 @@ import type {
   ToolcraftInteractionResult,
 } from "./performance-measurement-evidence";
 
+async function readToolcraftSliderValues(sliderValues: Locator): Promise<(string | null)[]> {
+  return sliderValues.evaluateAll((elements) =>
+    elements.map((element) =>
+      element.getAttribute("aria-valuenow") ??
+      (element instanceof HTMLInputElement ? element.value : null),
+    ),
+  );
+}
+
+async function dragToolcraftSliderToRatio(
+  page: Page,
+  slider: Locator,
+  ratio: number,
+): Promise<void> {
+  const box = await slider.boundingBox();
+  if (!box) {
+    throw new Error("Could not measure slider bounding box.");
+  }
+
+  const startX = box.x + box.width * 0.15;
+  const endX = box.x + box.width * ratio;
+  const y = box.y + box.height / 2;
+
+  await page.mouse.move(startX, y);
+  await page.mouse.down();
+  await page.mouse.move(endX, y, { steps: 12 });
+  await page.mouse.up();
+}
+
 async function dragToolcraftSliderInField(
   page: Page,
   field: Locator,
@@ -31,32 +60,24 @@ async function dragToolcraftSliderInField(
      coordinates outside the viewport (elementFromPoint there is null). */
   await slider.scrollIntoViewIfNeeded();
 
-  const box = await slider.boundingBox();
-  if (!box) {
-    throw new Error(`Could not measure slider "${description}".`);
+  const valuesBefore = await readToolcraftSliderValues(sliderValues);
+
+  await dragToolcraftSliderToRatio(page, slider, targetRatio);
+  let valuesAfter = await readToolcraftSliderValues(sliderValues);
+
+  /* targetRatio is an absolute drop position, not a relative delta: if the
+     control's current value already sits at (or resolves to) that same
+     ratio -- e.g. character.variety's default 0.6 over range [0, 1] lands
+     exactly on the hardcoded "primary" ratio of 0.6 -- the drag is real but
+     the resulting value is unchanged. Retry once from the opposite end of
+     the track so a same-position collision cannot masquerade as "the
+     control doesn't respond to drags". */
+  if (JSON.stringify(valuesAfter) === JSON.stringify(valuesBefore)) {
+    const fallbackRatio = targetRatio > 0.5 ? 0.05 : 0.95;
+    await dragToolcraftSliderToRatio(page, slider, fallbackRatio);
+    valuesAfter = await readToolcraftSliderValues(sliderValues);
   }
 
-  const startX = box.x + box.width * 0.15;
-  const endX = box.x + box.width * targetRatio;
-  const y = box.y + box.height / 2;
-  const valuesBefore = await sliderValues.evaluateAll((elements) =>
-    elements.map((element) =>
-      element.getAttribute("aria-valuenow") ??
-      (element instanceof HTMLInputElement ? element.value : null),
-    ),
-  );
-
-  await page.mouse.move(startX, y);
-  await page.mouse.down();
-  await page.mouse.move(endX, y, { steps: 12 });
-  await page.mouse.up();
-
-  const valuesAfter = await sliderValues.evaluateAll((elements) =>
-    elements.map((element) =>
-      element.getAttribute("aria-valuenow") ??
-      (element instanceof HTMLInputElement ? element.value : null),
-    ),
-  );
   expect(
     valuesAfter,
     `Toolcraft slider "${description}" must expose a changed value after its drag interaction.`,

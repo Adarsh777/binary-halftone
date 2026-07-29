@@ -253,6 +253,72 @@ test("browser: Shape/Yaw/Pitch hide once a media-driven source mode is selected"
   }
 });
 
+/* The tone ramp (buildRamp) is proven monotonic at the engine level in
+   halftone-engine.test.ts (every level's mean ink value trends upward with
+   no inversions). This proves the same property survives real, rendered
+   integration: a full 0-255 vertical grayscale sweep (not a two-tone
+   fixture, which could hide an inversion between just two sampled points)
+   uploaded as the Image (bitmap) source must render monotonically
+   increasing ink density band-by-band from the dark top to the bright
+   bottom, with no reversal anywhere in the sweep. */
+test("browser: the tone ramp renders a monotonic ink sweep across a full-range gradient source", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await selectHalftoneGateOption(page, "source.mode", "Image");
+  await uploadHalftoneFixtureImage(page, createGradientFixturePng());
+  // Full-bleed placement: avoid the transparent-letterbox/alpha shortcut
+  // documented on createGradientFixturePng, so the field reads real RGB
+  // luminance across the whole sweep instead of a binary alpha mask.
+  await selectHalftoneGateOption(page, "placement.fit", "Cover");
+  await dragToolcraftSliderByTarget(page, "placement.zoom", 1);
+
+  const canvas = page.locator("[data-toolcraft-product-output]");
+  await expect(canvas).toBeVisible();
+
+  const bandInkCounts = await canvas.evaluate((element) => {
+    const canvasElement = element as HTMLCanvasElement;
+    const ctx = canvasElement.getContext("2d", { willReadFrequently: true })!;
+    const { width, height } = canvasElement;
+    const bandCount = 8;
+    const bandHeight = Math.floor(height / bandCount);
+    const counts: number[] = [];
+
+    for (let band = 0; band < bandCount; band += 1) {
+      const { data } = ctx.getImageData(0, band * bandHeight, width, bandHeight);
+      let inkPixels = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        const alpha = data[i + 3];
+        // Ink (the bright glyph color) stands out against the dark
+        // background regardless of anti-aliasing specifics.
+        if (alpha > 10 && brightness > 60) inkPixels += 1;
+      }
+      counts.push(inkPixels);
+    }
+
+    return counts;
+  });
+
+  expect(
+    bandInkCounts.some((count) => count > 0),
+    "Full-range gradient upload must render at least some ink so band comparisons are meaningful.",
+  ).toBe(true);
+
+  const tolerance = Math.max(4, Math.round(Math.max(...bandInkCounts) * 0.03));
+  for (let band = 1; band < bandInkCounts.length; band += 1) {
+    expect(
+      bandInkCounts[band],
+      `Ink density band ${band} (${bandInkCounts[band]} px) must not be a meaningful reversal from the darker band ${band - 1} above it (${bandInkCounts[band - 1]} px); bands top-to-bottom: ${bandInkCounts.join(", ")}.`,
+    ).toBeGreaterThanOrEqual(bandInkCounts[band - 1] - tolerance);
+  }
+
+  expect(
+    bandInkCounts[bandInkCounts.length - 1],
+    `The brightest band (bottom) must render more ink than the darkest band (top); bands top-to-bottom: ${bandInkCounts.join(", ")}.`,
+  ).toBeGreaterThan(bandInkCounts[0]);
+});
+
 test("browser: export.includeBackground hides the live preview background and produces a transparent PNG", async ({
   page,
 }) => {
