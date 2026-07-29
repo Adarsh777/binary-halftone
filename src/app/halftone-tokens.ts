@@ -15,6 +15,24 @@ function str(values: HalftoneRuntimeValues, target: string, fallback: string): s
   return typeof value === "string" ? value : fallback;
 }
 
+/* Toolcraft's "color" control type commits edits as { hex: string } (see
+   ColorControlField.updateColor in the runtime UI), not a plain string,
+   even though a schema defaultValue is authored as a bare hex string. A
+   naive str() read only ever sees the seeded default and silently ignores
+   every real edit the user makes. */
+function colorHex(values: HalftoneRuntimeValues, target: string, fallback: string): string {
+  const value = values[target];
+  if (typeof value === "string") return value;
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof (value as { hex?: unknown }).hex === "string"
+  ) {
+    return (value as { hex: string }).hex;
+  }
+  return fallback;
+}
+
 function bool(values: HalftoneRuntimeValues, target: string, fallback: boolean): boolean {
   const value = values[target];
   return typeof value === "boolean" ? value : fallback;
@@ -30,7 +48,7 @@ export function getHalftoneTokens(values: HalftoneRuntimeValues): Tokens {
 
   return {
     alphas: [0.22, 0.36, 0.52, 0.7, 0.86, 1.0],
-    bg: str(values, "appearance.background", "#0a0a0a"),
+    bg: colorHex(values, "appearance.background", "#0a0a0a"),
     bgCutoff: num(values, "tone.backgroundCutoff", 0.045),
     black: num(values, "tone.blackPoint", 0.05),
     cellAspect: num(values, "grid.cellAspect", 1.35),
@@ -42,7 +60,7 @@ export function getHalftoneTokens(values: HalftoneRuntimeValues): Tokens {
     edgeLift: num(values, "tone.edgeLift", 0.55),
     font: FONT_STACK,
     gamma: num(values, "tone.gamma", 1),
-    ink: str(values, "appearance.ink", "#e8e8e6"),
+    ink: colorHex(values, "appearance.ink", "#e8e8e6"),
     lightDir: [
       num(values, "light.dirX", -0.45),
       num(values, "light.dirY", 0.78),

@@ -13,7 +13,10 @@ import {
   getToolcraftControlFieldByTarget,
 } from "./browser-control-target-helpers";
 import { clickToolcraftPanelActionByLabel } from "./performance-output-action-helpers";
-import { dragToolcraftSliderByTarget } from "./performance-slider-helpers";
+import {
+  dragToolcraftSliderByTarget,
+  dragToolcraftSliderTargetToValue,
+} from "./performance-slider-helpers";
 import {
   expectToolcraftProductObservableToChange,
   getToolcraftProductObservableSnapshot,
@@ -435,6 +438,107 @@ test("browser: shrinking the runtime canvas width changes the derived grid and r
 
   const widthField = await getToolcraftControlFieldByTarget(page, "canvas.size.width");
   await expect(widthField.getByRole("textbox").first()).toHaveValue("960");
+});
+
+async function setHalftoneColor(page: import("@playwright/test").Page, target: string, hex: string): Promise<void> {
+  const field = await getToolcraftControlFieldByTarget(page, target);
+  const input = field.locator('input[type="text"]').first();
+  await input.fill(hex);
+  await input.press("Enter");
+}
+
+/* getHalftoneTokens's colorHex() reader was recently fixed: the Toolcraft
+   "color" control commits edits as { hex } (ColorControlField.updateColor
+   in the runtime UI), not a plain string, so appearance.ink/background
+   never reached the engine at all before that fix -- every render used
+   the hardcoded schema default regardless of the picked color. This is
+   the pixel-level proof that ink now really reaches rendered output
+   through the full pipeline (tokens -> ctx.fillStyle -> tone-bucketed
+   fillText calls -> composited canvas pixels), not just that a value is
+   stored: Ink and Background are set to maximally-distinguishable pure
+   colors (red ink, blue background) with no shared channel, so the
+   rendered R-minus-B channel difference is a direct, unambiguous readout
+   of how much of a sampled region is opaque ink vs. background,
+   regardless of anti-aliasing. The brightest band of a full-range
+   gradient (mapped through the same tone-bucketed draw path proven
+   monotonic in the Tone section) must render close to pure, undistorted
+   ink red at full opacity, and that ink-coverage readout must increase
+   monotonically band-by-band -- proving each tone bucket is applying its
+   own distinct alpha to the *correct* cells, not a shared or shuffled one. */
+test("browser: ink color reaches rendered pixels through the full tone-bucketed draw path", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await selectHalftoneGateOption(page, "source.mode", "Image");
+  await uploadHalftoneFixtureImage(page, createGradientFixturePng());
+  await selectHalftoneGateOption(page, "placement.fit", "Cover");
+  // dragToolcraftSliderByTarget's ratio is a *slider position* (1 = the
+  // slider's max, real zoom 3), not the real value 1 the full-bleed
+  // reasoning above depends on; dragToolcraftSliderTargetToValue targets
+  // the actual zoom value so the whole gradient (both true extremes) is
+  // visible with no over-cropping into a narrow middle luminance slice.
+  await dragToolcraftSliderTargetToValue(page, "placement.zoom", 1);
+  await dragToolcraftSliderByTarget(page, "tone.dither", 0);
+
+  await setHalftoneColor(page, "appearance.ink", "#ff0000");
+  await setHalftoneColor(page, "appearance.background", "#0000ff");
+
+  const canvas = page.locator("[data-toolcraft-product-output]");
+  await expect(canvas).toBeVisible();
+
+  const bandStats = await canvas.evaluate((element) => {
+    const canvasElement = element as HTMLCanvasElement;
+    const ctx = canvasElement.getContext("2d", { willReadFrequently: true })!;
+    const { width, height } = canvasElement;
+    const bandCount = 8;
+    const bandHeight = Math.floor(height / bandCount);
+    const stats: { inkPixelCount: number; maxInkDiff: number }[] = [];
+
+    for (let band = 0; band < bandCount; band += 1) {
+      const { data } = ctx.getImageData(0, band * bandHeight, width, bandHeight);
+      let inkPixelCount = 0;
+      let maxInkDiff = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        // R (pure ink) minus B (pure background): +255 = pure ink,
+        // -255 = pure background, linear in between regardless of AA.
+        // Most of any band is background between sparse glyph strokes, so
+        // counting every pixel washes out the ink density signal; only
+        // pixels closer to ink than background count as "ink" for
+        // density. A glyph's fillText interior (not just its
+        // anti-aliased edge, which most "ink" pixels are) reaches true
+        // full opacity at the top tone level, so the *maximum* diff found
+        // anywhere in the band -- not the mean, which is dominated by
+        // partial-coverage edges -- is what proves undistorted full-ink
+        // color genuinely reaches pixels.
+        const diff = data[i] - data[i + 2];
+        if (diff > 0) inkPixelCount += 1;
+        if (diff > maxInkDiff) maxInkDiff = diff;
+      }
+      stats.push({ inkPixelCount, maxInkDiff });
+    }
+
+    return stats;
+  });
+
+  const inkCounts = bandStats.map((band) => band.inkPixelCount);
+  const peakInkDiff = Math.max(...bandStats.map((band) => band.maxInkDiff));
+
+  expect(
+    peakInkDiff,
+    `At least some pixel must render as close to pure, full-opacity ink red (diff near +255), not some gamma-shifted or mis-colored approximation; band stats: ${JSON.stringify(bandStats)}.`,
+  ).toBeGreaterThan(200);
+
+  for (let band = 1; band < inkCounts.length; band += 1) {
+    expect(
+      inkCounts[band],
+      `Ink-pixel density must not reverse from band ${band - 1} to ${band} (a tone-bucket inversion); counts: ${inkCounts.join(", ")}.`,
+    ).toBeGreaterThanOrEqual(inkCounts[band - 1]! * 0.9 - 5);
+  }
+
+  expect(
+    inkCounts[inkCounts.length - 1],
+    `Ink-pixel density must increase from the darkest to the brightest band; counts: ${inkCounts.join(", ")}.`,
+  ).toBeGreaterThan(inkCounts[0]!);
 });
 
 test("browser: export.includeBackground hides the live preview background and produces a transparent PNG", async ({

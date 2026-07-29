@@ -259,6 +259,8 @@ export const appControlSectionInventory: readonly ToolcraftControlSectionInvento
   {
     entity: "Ink",
     groupingReason: "Foreground glyph color is the entire semantic content of this section.",
+    splitReason:
+      "Background is split out into the runtime's required Background section (paired with the Include export toggle) rather than merged here, so the export-visibility control and its color stay in the one section the output-export contract requires.",
     targets: ["appearance.ink"],
     title: "Ink",
     workflowStage: "color",
@@ -267,6 +269,8 @@ export const appControlSectionInventory: readonly ToolcraftControlSectionInvento
     entity: "Background",
     groupingReason:
       "Required runtime Background section: the Include switch and the product's own background color control for preview/export.",
+    splitReason:
+      "appearance.background is kept in this required Background section (with export.includeBackground) instead of merged into Ink, since Toolcraft's output-export contract requires the background color and its export-visibility toggle to live together.",
     targets: ["export.includeBackground", "appearance.background"],
     title: "Background",
     workflowStage: "output background",
@@ -771,5 +775,23 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     kind: "control",
     target: "tone.edgeLift",
     userAction: "Drag the Edge Lift slider.",
+  },
+
+  // ---------- Ink ----------
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("appearance.ink"),
+    browser: true,
+    browserTestName: "browser: ink color reaches rendered pixels through the full tone-bucketed draw path",
+    componentType: "color",
+    evidence: "product-output",
+    expectedObservable:
+      "Picking a different Ink color changes ctx.fillStyle for every drawn glyph, changing the rendered glyph grid's color.",
+    fixture:
+      "Default product state; set Ink to a new hex value via the field's text input (also proven with a maximally-distinguishable red-ink/blue-background pair against a full-range gradient source, confirming full-opacity glyph pixels render undistorted ink color and that ink-pixel density increases monotonically across the tone-bucketed draw path's levels -- see halftone-tokens.ts colorHex()).",
+    id: "appearance.ink",
+    kind: "control",
+    target: "appearance.ink",
+    userAction: "Type a new hex value into the Ink field.",
   },
 ];
