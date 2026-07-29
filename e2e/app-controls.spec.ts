@@ -319,6 +319,36 @@ test("browser: the tone ramp renders a monotonic ink sweep across a full-range g
   ).toBeGreaterThan(bandInkCounts[0]);
 });
 
+/* The grid model is settled: grid.cellWidth/grid.cellAspect are the only
+   product-owned grid controls (already proven above); columns/rows are
+   derived from the runtime canvas size every redraw
+   (getHalftoneGridSize(canvasWidth, canvasHeight, cellWidth, cellAspect)
+   in halftone-engine.test.ts) and have no schema target of their own, so
+   they must not be exercised as directly-settable controls. This proves
+   the derivation is really wired to the live runtime canvas size, not
+   just a pure function tested in isolation: shrinking the runtime-owned
+   Canvas width field, with grid.cellWidth/cellAspect untouched, must
+   change the rendered glyph grid. */
+test("browser: shrinking the runtime canvas width changes the derived grid and rendered output", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const session = await createToolcraftBrowserProofSession(page);
+
+  await expectToolcraftProductObservableToChange(
+    session,
+    session.controlAction("canvas.size.width", async (control) => {
+      const input = control.getByRole("textbox").first();
+      await input.fill("960");
+      await input.press("Tab");
+    }),
+    { requirementId: "canvas.size.width" },
+  );
+
+  const widthField = await getToolcraftControlFieldByTarget(page, "canvas.size.width");
+  await expect(widthField.getByRole("textbox").first()).toHaveValue("960");
+});
+
 test("browser: export.includeBackground hides the live preview background and produces a transparent PNG", async ({
   page,
 }) => {

@@ -629,4 +629,42 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     target: "character.weight",
     userAction: "Open the Weight select and choose a different weight.",
   },
+
+  // ---------- Grid ----------
+  // Columns/rows are derived from the runtime canvas size (grid model
+  // settled in Decision Trail Iteration 1) and have no schema control of
+  // their own; only cellAspect/cellWidth are real product controls. See
+  // "browser: shrinking the runtime canvas width changes the derived grid
+  // and rendered output" and the accompanying engine test for the
+  // canvas-size-reactivity proof.
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("grid.cellAspect"),
+    browser: true,
+    browserTestName: "browser: grid.cellAspect changes rendered output",
+    componentType: "slider",
+    evidence: "product-output",
+    expectedObservable:
+      "Dragging Cell Aspect changes the derived row count for the current canvas size, changing the rendered glyph grid.",
+    fixture: "Default product state; drag the Cell Aspect slider.",
+    id: "grid.cellAspect",
+    kind: "control",
+    target: "grid.cellAspect",
+    userAction: "Drag the Cell Aspect slider.",
+  },
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("grid.cellWidth"),
+    browser: true,
+    browserTestName: "browser: grid.cellWidth changes rendered output",
+    componentType: "slider",
+    evidence: "product-output",
+    expectedObservable:
+      "Dragging Cell Width changes the derived column count for the current canvas size, changing the rendered glyph grid.",
+    fixture: "Default product state; drag the Cell Width slider.",
+    id: "grid.cellWidth",
+    kind: "control",
+    target: "grid.cellWidth",
+    userAction: "Drag the Cell Width slider.",
+  },
 ];
