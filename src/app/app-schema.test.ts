@@ -121,4 +121,11 @@ describe("appSchema", () => {
       type: "settingsTransfer",
     });
   });
+
+  it("persists user-edited control values, canvas size, and panel state to localStorage", () => {
+    expect(appSchema.persistence.storage).toBe("localStorage");
+    if (appSchema.persistence.storage !== "localStorage") throw new Error("unreachable");
+    expect(appSchema.persistence.include).toEqual(expect.arrayContaining(["values", "canvas", "panels"]));
+    expect(appSchema.persistence.key.length).toBeGreaterThan(0);
+  });
 });

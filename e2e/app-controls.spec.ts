@@ -74,6 +74,10 @@ test("browser: named presets and video-as-source stay excluded; Settings Transfe
    (Placement/Silhouette/Custom Characters) also prove their conditional
    visibility through the same gating control before being exercised. */
 for (const config of HALFTONE_CONTROL_CONFIGS) {
+  if (config.skipsCanvasOutputTest) {
+    continue;
+  }
+
   test(`browser: ${config.target} changes rendered output`, async ({ page }) => {
     await page.goto("/");
     const session = await createToolcraftBrowserProofSession(page);
@@ -628,6 +632,82 @@ test("browser: Export PNG downloads a real decodable PNG", async ({ page }) => {
     }),
     { requirementId: "output.export-png" },
   );
+});
+
+/* export.image.format/export.image.resolution never touch the live preview
+   canvas -- rendererPipeline's interactionInvalidation declares them as
+   invalidating only "export-composite", explicitly must-not-invalidate
+   build-field/build-ramp/rasterize-glyphs (see app-performance.ts). The
+   generic canvas-output-diff test every other control uses is structurally
+   the wrong tool here (confirmed live: it times out waiting for a preview
+   change that never happens by design). The real, provable effect is on
+   the exported artifact's own bytes, not the canvas. */
+test("browser: export.image.format changes the exported file's real format (PNG vs JPG)", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await selectHalftoneGateOption(page, "export.image.format", "JPG");
+
+  const artifact = await expectToolcraftExportedArtifact(
+    async () => {
+      const [download] = await Promise.all([
+        page.waitForEvent("download"),
+        clickToolcraftPanelActionByLabel(page, "Export PNG"),
+      ]);
+      const suggestedFilename = download.suggestedFilename();
+      const path = await download.path();
+      if (!path) throw new Error("Export PNG (JPG format) did not produce a downloadable file.");
+      const fs = await import("node:fs/promises");
+      const bytes = await fs.readFile(path);
+      return { bytes, suggestedFilename };
+    },
+    ({ bytes, suggestedFilename }: { bytes: Buffer; suggestedFilename: string }) => {
+      const isJpegSignature = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+      return {
+        byteLength: bytes.byteLength,
+        height: 1,
+        mediaType: isJpegSignature ? "image/jpeg" : "image/unknown",
+        suggestedFilename,
+        width: 1,
+      };
+    },
+    { requirementId: "export.image.format" },
+  );
+
+  expect(artifact.suggestedFilename).toMatch(/\.jpg$/);
+  expect(
+    artifact.bytes[0] === 0xff && artifact.bytes[1] === 0xd8 && artifact.bytes[2] === 0xff,
+    "Selecting JPG must produce a real JPEG file (FF D8 FF signature), not a PNG.",
+  ).toBe(true);
+});
+
+test("browser: export.image.resolution changes the exported file's real pixel dimensions", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  async function exportPngWidth(): Promise<number> {
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      clickToolcraftPanelActionByLabel(page, "Export PNG"),
+    ]);
+    const path = await download.path();
+    if (!path) throw new Error("Export PNG did not produce a downloadable file.");
+    const fs = await import("node:fs/promises");
+    const bytes = await fs.readFile(path);
+    return bytes.readUInt32BE(16);
+  }
+
+  await selectHalftoneGateOption(page, "export.image.resolution", "2K");
+  const width2k = await exportPngWidth();
+
+  await selectHalftoneGateOption(page, "export.image.resolution", "8K");
+  const width8k = await exportPngWidth();
+
+  expect(
+    width8k,
+    `8K export width (${width8k}px) must be substantially larger than 2K export width (${width2k}px).`,
+  ).toBeGreaterThan(width2k * 3);
 });
 
 test("browser: Copy Tokens writes the current engine token set to the clipboard", async ({

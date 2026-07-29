@@ -801,6 +801,174 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     userAction: "Type a new hex value into the Ink field.",
   },
 
+  // ---------- Light ----------
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("light.rim"),
+    browser: true,
+    browserTestName: "browser: light.rim changes rendered output",
+    componentType: "slider",
+    evidence: "product-output",
+    expectedObservable: "Dragging Rim changes the rim-light term in shade(), changing the rendered shading and glyph grid.",
+    fixture: "Default product state (Scene mode); drag the Rim slider.",
+    id: "light.rim",
+    kind: "control",
+    target: "light.rim",
+    userAction: "Drag the Rim slider.",
+  },
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("light.dirX"),
+    browser: true,
+    browserTestName: "browser: light.dirX changes rendered output",
+    componentType: "slider",
+    evidence: "product-output",
+    expectedObservable: "Dragging Direction X changes the light direction used by shade(), changing the rendered shading and glyph grid.",
+    fixture: "Default product state (Scene mode); drag the Direction X slider.",
+    id: "light.dirX",
+    kind: "control",
+    target: "light.dirX",
+    userAction: "Drag the Direction X slider.",
+  },
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("light.dirY"),
+    browser: true,
+    browserTestName: "browser: light.dirY changes rendered output",
+    componentType: "slider",
+    evidence: "product-output",
+    expectedObservable: "Dragging Direction Y changes the light direction used by shade(), changing the rendered shading and glyph grid.",
+    fixture: "Default product state (Scene mode); drag the Direction Y slider.",
+    id: "light.dirY",
+    kind: "control",
+    target: "light.dirY",
+    userAction: "Drag the Direction Y slider.",
+  },
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("light.dirZ"),
+    browser: true,
+    browserTestName: "browser: light.dirZ changes rendered output",
+    componentType: "slider",
+    evidence: "product-output",
+    expectedObservable: "Dragging Direction Z changes the light direction used by shade(), changing the rendered shading and glyph grid.",
+    fixture: "Default product state (Scene mode); drag the Direction Z slider.",
+    id: "light.dirZ",
+    kind: "control",
+    target: "light.dirZ",
+    userAction: "Drag the Direction Z slider.",
+  },
+
+  // ---------- Background ----------
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("appearance.background"),
+    browser: true,
+    browserTestName: "browser: appearance.background changes rendered output",
+    componentType: "color",
+    evidence: "product-output",
+    expectedObservable:
+      "Picking a different Background color changes the canvas fillRect color behind the glyph grid.",
+    fixture: "Default product state; set Background to a new hex value via the field's text input.",
+    id: "appearance.background",
+    kind: "control",
+    target: "appearance.background",
+    userAction: "Type a new hex value into the Background field.",
+  },
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("export.includeBackground"),
+    browser: true,
+    browserTestName:
+      "browser: export.includeBackground hides the live preview background and produces a transparent PNG",
+    backgroundOutputCoverage: ["preview-hidden-when-excluded", "image-transparent-when-excluded"],
+    componentType: "switch",
+    evidence: "product-output",
+    expectedObservable:
+      "Toggling Include off hides the live preview background (transparent fill) and makes the exported PNG's background transparent; toggling it on restores the opaque Background color in both preview and export.",
+    fixture: "Default product state; toggle Include off, then export PNG and inspect its alpha channel.",
+    id: "export.includeBackground",
+    kind: "control",
+    target: "export.includeBackground",
+    userAction: "Toggle the Include switch, then click Export PNG.",
+  },
+
+  // ---------- Image Export ----------
+  // export.image.format/resolution never touch the live preview canvas
+  // (rendererPipeline interactionInvalidation: invalidates only
+  // "export-composite", must-not-invalidate build-field/build-ramp/
+  // rasterize-glyphs), so their evidence is on the exported artifact's
+  // real bytes, not a canvas-output diff.
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("export.image.format"),
+    browser: true,
+    browserTestName: "browser: export.image.format changes the exported file's real format (PNG vs JPG)",
+    componentType: "select",
+    evidence: "exported-bytes",
+    expectedObservable:
+      "Selecting JPG produces a real JPEG file (FF D8 FF signature, .jpg download name) instead of a PNG.",
+    fixture: "Default product state; select JPG, then click Export PNG and inspect the downloaded file's signature bytes.",
+    id: "export.image.format",
+    kind: "control",
+    optionCoverage: ["png", "jpg"],
+    target: "export.image.format",
+    userAction: "Open the Format select, choose JPG, then click Export PNG.",
+  },
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("export.image.resolution"),
+    browser: true,
+    browserTestName: "browser: export.image.resolution changes the exported file's real pixel dimensions",
+    componentType: "select",
+    evidence: "exported-bytes",
+    expectedObservable: "Selecting a higher Resolution produces a real exported PNG with substantially larger pixel dimensions.",
+    fixture: "Default product state; export at 2K, then at 8K, and compare the downloaded PNGs' decoded width.",
+    id: "export.image.resolution",
+    kind: "control",
+    optionCoverage: ["2k", "4k", "8k"],
+    target: "export.image.resolution",
+    userAction: "Open the Resolution select, choose 2K or 8K, then click Export PNG.",
+  },
+
+  // ---------- Persistence (runtime, not tied to one control section) ----------
+  {
+    automated: true,
+    automatedTestName:
+      "persists user-edited control values, canvas size, and panel state to localStorage",
+    browser: true,
+    browserTestName: "browser: appearance.ink persists across a real page reload",
+    componentType: "persistence",
+    evidence: "persistence-state",
+    expectedObservable:
+      "A user-edited control value (Ink) survives a real browser reload, restored from localStorage rather than reverting to its schema default.",
+    fixture: "Set Ink to a new hex value, reload the page, and confirm the edited value is still shown.",
+    id: "persistence.reload",
+    kind: "runtime",
+    persistenceCoverage: "reload",
+    target: "appearance.ink",
+    userAction: "Edit the Ink field, then reload the page.",
+  },
+
+  // ---------- Export (footer) ----------
+  {
+    actionCoverage: ["export.png", "copy.tokens"],
+    automated: true,
+    automatedTestName:
+      "engine: the sticky Export section exposes Export PNG and Copy Tokens actions",
+    browser: true,
+    browserTestName: "browser: Export PNG downloads a real decodable PNG",
+    componentType: "panelActions",
+    evidence: "exported-bytes",
+    expectedObservable:
+      "The sticky Export footer exposes Export PNG and Copy Tokens actions, and each one produces its real output (a downloaded PNG, or clipboard tokens JSON).",
+    fixture: "Default product state; click Export PNG and Copy Tokens in turn.",
+    id: "actions.output",
+    kind: "control",
+    target: "actions.output",
+    userAction: "Click the sticky Export PNG and Copy Tokens actions.",
+  },
+
   // ---------- Reference-clone bundle (runtime, not tied to one control section) ----------
   // referenceFeatureInventory items point their acceptanceId at these (and
   // at the control-level rows above tagged with referenceCoverage) so every
