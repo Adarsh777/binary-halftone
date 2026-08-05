@@ -547,6 +547,17 @@ export const appSchema = defineToolcraft({
               target: "export.includeBackground",
               type: "switch",
             },
+            themeReversed: {
+              defaultValue: false,
+              description:
+                "Swaps Ink and Background and mirrors the tone ramp so the same source still reads correctly (not as a negative) on the reversed palette -- for output meant to sit on a light background.",
+              label: "Reverse theme",
+              performanceReason:
+                "Reversal only changes which colorHex() result each fillStyle uses and which ramp index a source tone resolves to; it does not change per-cell iteration cost.",
+              performanceRole: "responsiveness",
+              target: "appearance.themeReversed",
+              type: "switch",
+            },
           },
           layoutGroups: [
             {

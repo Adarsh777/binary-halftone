@@ -282,7 +282,7 @@ export const appControlSectionInventory: readonly ToolcraftControlSectionInvento
       "Required runtime Background section: the Include switch and the product's own background color control for preview/export.",
     splitReason:
       "appearance.background is kept in this required Background section (with export.includeBackground) instead of merged into Ink, since Toolcraft's output-export contract requires the background color and its export-visibility toggle to live together.",
-    targets: ["export.includeBackground", "appearance.background"],
+    targets: ["export.includeBackground", "appearance.background", "appearance.themeReversed"],
     title: "Background",
     workflowStage: "output background",
   },
@@ -901,6 +901,22 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     kind: "control",
     target: "export.includeBackground",
     userAction: "Toggle the Include switch, then click Export PNG.",
+  },
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("appearance.themeReversed"),
+    browser: true,
+    browserTestName: "browser: appearance.themeReversed swaps ink/background colors and reads correctly, not as a negative",
+    componentType: "switch",
+    evidence: "product-output",
+    expectedObservable:
+      "Toggling Reverse theme swaps the rendered Ink and Background colors (both still routed through colorHex()) and mirrors the final ramp-index lookup so the same source tone still reads correctly on the reversed palette -- a bright source region stays visually bright and a dark source region stays visually dark, not inverted into a photographic negative. buildRamp's coverage measurement and sort, and the gamma/edgeLift/dither tone-shaping chain, are untouched; only which real, measured-coverage ramp pool a tone resolves to is mirrored. Toggling off restores the original colors and mapping exactly.",
+    fixture:
+      "Full-range gradient uploaded as the Image source (Cover fit, zoom 1); toggle Reverse theme on and off.",
+    id: "appearance.themeReversed",
+    kind: "control",
+    target: "appearance.themeReversed",
+    userAction: "Toggle the Reverse theme switch.",
   },
 
   // ---------- Image Export ----------

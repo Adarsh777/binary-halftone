@@ -41,6 +41,7 @@ export type Tokens = {
   font: string;
   gamma: number;
   ink: string;
+  invert: boolean;
   lightDir: readonly [number, number, number];
   overlap: number;
   rim: number;
@@ -61,6 +62,10 @@ export const DEFAULT_TOKENS: Tokens = {
   weight: 400,
   ink: "#e8e8e6",
   bg: "#0a0a0a",
+  invert: false,         // mirrors the final ramp-index lookup (see drawHalftone)
+                         // so a bright source pixel resolves to the sparse/
+                         // sentinel end instead of the dense end; buildRamp's
+                         // coverage measurement and sort are untouched.
 
   cellW: 8,
   cellAspect: 1.35,

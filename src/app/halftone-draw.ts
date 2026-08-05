@@ -81,7 +81,13 @@ export function drawHalftone(
     L = Math.min(L + edge[k] * t.edgeLift, 1);
     const taper = smoothstep(0, step, L) * smoothstep(0, step, 1 - L);
     L += BAYER[j & 7][i & 7] * t.dither * taper * step * 2;
-    const idx = clamp(Math.round(L * levels), 0, levels);
+    const idxRaw = clamp(Math.round(L * levels), 0, levels);
+    // Presentational theme reversal: mirror which real, measured-coverage
+    // ramp pool this true (uninverted) source tone resolves to, so a bright
+    // source pixel lands on the sparse/sentinel end instead of the dense
+    // end -- gamma/edgeLift/dither above still shape the true L unchanged,
+    // and buildRamp's coverage measurement/sort never sees this flag.
+    const idx = t.invert ? clamp(levels - idxRaw, 0, levels) : idxRaw;
     if (idx > 0) {
       const pool = ramp[idx]!;
       const slot = pool.length === 1 ? 0 : hash2(i, j) % pool.length;

@@ -1078,3 +1078,173 @@ test("browser: appearance.ink persists across a real page reload", async ({ page
     { requirementId: "persistence.appearance-ink" },
   );
 });
+
+/* measureGradientBandInkCounts (used by the character.scale monotonicity
+   test) assumes light-ink-on-dark-background: it classifies a pixel as
+   "ink" via a fixed brightness>60 threshold. That assumption breaks under
+   appearance.themeReversed, where ink can be the *dark* color. This
+   classifies each pixel by nearest-color distance to the two actual
+   colors in play (whichever is "ink" for the current toggle state), so it
+   works identically for both the normal and reversed palette. */
+function hexToRgb(hex: string): [number, number, number] {
+  const normalized = hex.replace("#", "");
+  return [
+    Number.parseInt(normalized.slice(0, 2), 16),
+    Number.parseInt(normalized.slice(2, 4), 16),
+    Number.parseInt(normalized.slice(4, 6), 16),
+  ];
+}
+
+async function measureGradientBandColorCounts(
+  page: import("@playwright/test").Page,
+  inkHex: string,
+  bgHex: string,
+): Promise<number[]> {
+  const canvas = page.locator("[data-toolcraft-product-output]");
+  const [inkR, inkG, inkB] = hexToRgb(inkHex);
+  const [bgR, bgG, bgB] = hexToRgb(bgHex);
+
+  return canvas.evaluate(
+    (element, { bgB, bgG, bgR, inkB, inkG, inkR }) => {
+      const canvasElement = element as HTMLCanvasElement;
+      const ctx = canvasElement.getContext("2d", { willReadFrequently: true })!;
+      const { width, height } = canvasElement;
+      const bandCount = 8;
+      const bandHeight = Math.floor(height / bandCount);
+      const counts: number[] = [];
+
+      for (let band = 0; band < bandCount; band += 1) {
+        const { data } = ctx.getImageData(0, band * bandHeight, width, bandHeight);
+        let inkPixels = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] <= 10) continue; // transparent/background-only sample
+          const r = data[i], g = data[i + 1], b = data[i + 2];
+          const distToInk = (r - inkR) ** 2 + (g - inkG) ** 2 + (b - inkB) ** 2;
+          const distToBg = (r - bgR) ** 2 + (g - bgG) ** 2 + (b - bgB) ** 2;
+          if (distToInk < distToBg) inkPixels += 1;
+        }
+        counts.push(inkPixels);
+      }
+
+      return counts;
+    },
+    { bgB, bgG, bgR, inkB, inkG, inkR },
+  );
+}
+
+/* Task: presentational theme reversal that still READS CORRECTLY on the
+   reversed palette (not a photographic negative). A naive palette-swap-only
+   implementation (colors swapped, ramp-index mirror missing) would still
+   pass a test that only checks "colors changed" -- it changes colors, it
+   just inverts *which* source tone gets which color. This proves the real
+   requirement: the brightest source region reads as ink-sparse/bg-dominant
+   (visually bright) and the darkest source region reads as ink-dense
+   (visually dark), on the *reversed* palette, matching the true source --
+   sensitivity-checked directly below against that exact naive version. */
+test("browser: appearance.themeReversed reads correctly on the reversed palette, not as a negative", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await selectHalftoneGateOption(page, "source.mode", "Image");
+  await uploadHalftoneFixtureImage(page, createGradientFixturePng());
+  await selectHalftoneGateOption(page, "placement.fit", "Cover");
+  await dragToolcraftSliderByTarget(page, "placement.zoom", 1);
+
+  const themeReversedField = await getToolcraftControlFieldByTarget(page, "appearance.themeReversed");
+  await themeReversedField.getByRole("switch").click();
+
+  // Under reversal, tokens.ink/tokens.bg are the pre-toggle bg/ink values
+  // (see getHalftoneTokens) -- default ink #e8e8e6, default bg #0a0a0a.
+  const reversedInk = "#0a0a0a";
+  const reversedBg = "#e8e8e6";
+  const bandInkCounts = await measureGradientBandColorCounts(page, reversedInk, reversedBg);
+
+  expect(
+    bandInkCounts.some((count) => count > 0) && bandInkCounts.some((count, i) => i > 0 && count !== bandInkCounts[0]),
+    `themeReversed on: bands must show real, varying ink density so this proof is meaningful; bands: ${bandInkCounts.join(", ")}.`,
+  ).toBe(true);
+
+  // Gradient source is dark at the top, bright at the bottom. Correct
+  // inversion: dark source -> dense ink (reads dark); bright source ->
+  // sparse ink/bg-dominant (reads bright). Ink pixel *count* must
+  // therefore be highest at the top band and lowest at the bottom band --
+  // the mirror image of the non-reversed case, not the same direction.
+  expect(
+    bandInkCounts[0],
+    `themeReversed on: the darkest source region (top band, ${bandInkCounts[0]} ink px) must read as ink-dense -- denser than the brightest region (bottom band, ${bandInkCounts[bandInkCounts.length - 1]} ink px). If this fails, the output is reading as a photographic negative.`,
+  ).toBeGreaterThan(bandInkCounts[bandInkCounts.length - 1]);
+});
+
+/* buildRamp's coverage measurement/sort must be identical whether invert is
+   on or off (only the final index lookup mirrors) -- so the ramp's own
+   monotonic ordering must survive the toggle with no bunching or
+   double-inversion at the boundary. Same tolerance-band technique as the
+   character.scale monotonicity proof, but asserting the mirrored
+   (decreasing top-to-bottom) direction under themeReversed. */
+test("browser: appearance.themeReversed preserves ramp monotonicity (mirrored direction, no bunching)", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await selectHalftoneGateOption(page, "source.mode", "Image");
+  await uploadHalftoneFixtureImage(page, createGradientFixturePng());
+  await selectHalftoneGateOption(page, "placement.fit", "Cover");
+  await dragToolcraftSliderByTarget(page, "placement.zoom", 1);
+
+  const themeReversedField = await getToolcraftControlFieldByTarget(page, "appearance.themeReversed");
+  await themeReversedField.getByRole("switch").click();
+
+  const bandInkCounts = await measureGradientBandColorCounts(page, "#0a0a0a", "#e8e8e6");
+  const tolerance = Math.max(4, Math.round(Math.max(...bandInkCounts) * 0.03));
+
+  for (let band = 1; band < bandInkCounts.length; band += 1) {
+    expect(
+      bandInkCounts[band],
+      `themeReversed on: ink density band ${band} (${bandInkCounts[band]} px) must not be a meaningful reversal from the denser band ${band - 1} above it (${bandInkCounts[band - 1]} px) -- bands top-to-bottom: ${bandInkCounts.join(", ")}.`,
+    ).toBeLessThanOrEqual(bandInkCounts[band - 1] + tolerance);
+  }
+});
+
+test("browser: appearance.themeReversed swap and mirror reach the real exported PNG, not just the preview", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await selectHalftoneGateOption(page, "source.mode", "Image");
+  await uploadHalftoneFixtureImage(page, createGradientFixturePng());
+  await selectHalftoneGateOption(page, "placement.fit", "Cover");
+  await dragToolcraftSliderByTarget(page, "placement.zoom", 1);
+
+  const themeReversedField = await getToolcraftControlFieldByTarget(page, "appearance.themeReversed");
+  await themeReversedField.getByRole("switch").click();
+
+  const bytes = await downloadAndReadExportedPng(page);
+  const decoded = decodePng(bytes);
+  const [inkR, inkG, inkB] = hexToRgb("#0a0a0a");
+  const [bgR, bgG, bgB] = hexToRgb("#e8e8e6");
+
+  const topRowY = 2;
+  const bottomRowY = decoded.height - 3;
+  let topInkPixels = 0;
+  let bottomInkPixels = 0;
+
+  for (let x = 0; x < decoded.width; x += 4) {
+    const top = getPngPixelAt(decoded, x, topRowY);
+    const distTopInk = (top.r - inkR) ** 2 + (top.g - inkG) ** 2 + (top.b - inkB) ** 2;
+    const distTopBg = (top.r - bgR) ** 2 + (top.g - bgG) ** 2 + (top.b - bgB) ** 2;
+    if (distTopInk < distTopBg) topInkPixels += 1;
+
+    const bottom = getPngPixelAt(decoded, x, bottomRowY);
+    const distBottomInk = (bottom.r - inkR) ** 2 + (bottom.g - inkG) ** 2 + (bottom.b - inkB) ** 2;
+    const distBottomBg = (bottom.r - bgR) ** 2 + (bottom.g - bgG) ** 2 + (bottom.b - bgB) ** 2;
+    if (distBottomInk < distBottomBg) bottomInkPixels += 1;
+  }
+
+  expect(
+    topInkPixels,
+    `Exported PNG (themeReversed on): the darkest source region (top row, ${topInkPixels} ink px) must read as ink-dense compared to the brightest region (bottom row, ${bottomInkPixels} ink px) in the real downloaded artifact, not just the live preview.`,
+  ).toBeGreaterThan(bottomInkPixels);
+
+  await attachToolcraftBrowserRuntimeEvidence({
+    evidenceType: "product-output",
+    requirementId: "appearance.themeReversed",
+  });
+});

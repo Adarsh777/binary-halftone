@@ -334,6 +334,7 @@ export const HALFTONE_CONTROL_CONFIGS: readonly HalftoneControlConfig[] = [
   { kind: "color", label: "Ink", target: "appearance.ink", workload: false },
   { kind: "color", label: "Background", target: "appearance.background", workload: false },
   { kind: "switch", label: "Include", target: "export.includeBackground", workload: false },
+  { kind: "switch", label: "Reverse theme", target: "appearance.themeReversed", workload: false },
 
   {
     kind: "select",
@@ -369,6 +370,7 @@ export function getHalftoneControlConfig(target: string): HalftoneControlConfig 
 export const HALFTONE_ENGINE_TEST_NAME_BY_TARGET: Readonly<Record<string, string>> = {
   "appearance.background": "engine: appearance.background maps into engine tokens",
   "appearance.ink": "engine: appearance.ink maps into engine tokens",
+  "appearance.themeReversed": "engine: appearance.themeReversed swaps ink/bg and mirrors the ramp index without touching buildRamp",
   "character.customChars": "engine: character.customChars parses the custom charset",
   "character.mode": "engine: character.mode selects the correct charset",
   "character.scale": "engine: character.scale composes with charSize without overflowing the cell and re-measures ink coverage",
@@ -378,7 +380,7 @@ export const HALFTONE_ENGINE_TEST_NAME_BY_TARGET: Readonly<Record<string, string
   "character.variety": "engine: character.variety maps into engine tokens",
   "character.weight": "engine: character.weight maps into engine tokens",
   "export.image.format": "engine: export.image.format maps to a real PNG/JPG export choice",
-  "export.image.resolution": "engine: export.image.resolution maps to a real 1x/2K/4K/8K export choice",
+  "export.image.resolution": "engine: export.image.resolution maps to a real 2K/4K/8K export choice",
   "export.includeBackground": "engine: export.includeBackground toggles the preview/export background token",
   "grid.cellAspect": "engine: grid.cellAspect changes the derived grid size",
   "grid.cellWidth": "engine: grid.cellWidth changes the derived grid size",

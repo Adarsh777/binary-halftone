@@ -46,9 +46,18 @@ export function getHalftoneTokens(values: HalftoneRuntimeValues): Tokens {
   const customChars = str(values, "character.customChars", "01");
   const weight = Number.parseInt(str(values, "character.weight", "400"), 10) || 400;
 
+  // appearance.themeReversed is presentational only: it swaps which of the
+  // two colorHex()-read colors is "ink" vs "bg" (still routed through
+  // colorHex(), never a raw-string read) and sets Tokens.invert so
+  // drawHalftone mirrors the final ramp-index lookup. Neither reaches
+  // buildRamp/inkCoverage or the tone-shaping chain -- see halftone-draw.ts.
+  const themeReversed = bool(values, "appearance.themeReversed", false);
+  const background = colorHex(values, "appearance.background", "#0a0a0a");
+  const ink = colorHex(values, "appearance.ink", "#e8e8e6");
+
   return {
     alphas: [0.22, 0.36, 0.52, 0.7, 0.86, 1.0],
-    bg: colorHex(values, "appearance.background", "#0a0a0a"),
+    bg: themeReversed ? ink : background,
     bgCutoff: num(values, "tone.backgroundCutoff", 0.045),
     black: num(values, "tone.blackPoint", 0.05),
     cellAspect: num(values, "grid.cellAspect", 1.35),
@@ -60,7 +69,8 @@ export function getHalftoneTokens(values: HalftoneRuntimeValues): Tokens {
     edgeLift: num(values, "tone.edgeLift", 0.55),
     font: FONT_STACK,
     gamma: num(values, "tone.gamma", 1),
-    ink: colorHex(values, "appearance.ink", "#e8e8e6"),
+    ink: themeReversed ? background : ink,
+    invert: themeReversed,
     lightDir: [
       num(values, "light.dirX", -0.45),
       num(values, "light.dirY", 0.78),

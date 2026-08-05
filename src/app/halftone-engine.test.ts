@@ -3,11 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   buildRamp,
   buildScaleAxis,
+  DEFAULT_TOKENS,
+  drawHalftone,
   hash2,
   renderScene,
   resolveCharset,
   type CanvasFactory,
+  type Field,
   type SceneOptions,
+  type Tokens,
 } from "./halftone";
 import { getHalftoneGridSize } from "./halftone-field";
 import {
@@ -384,6 +388,153 @@ describe("engine: appearance and background controls map into engine tokens", ()
     const tokens = getHalftoneTokens({ "appearance.background": "#123456" });
     expect(applyHalftoneBackgroundOverride(tokens, true).bg).toBe("#123456");
     expect(applyHalftoneBackgroundOverride(tokens, false).bg).toBe("transparent");
+  });
+
+  it("engine: appearance.themeReversed swaps ink/background (both still through colorHex()) and sets invert", () => {
+    const values = {
+      "appearance.background": "#123456",
+      "appearance.ink": "#ff00ff",
+      "appearance.themeReversed": true,
+    };
+    const tokens = getHalftoneTokens(values);
+    expect(tokens.ink).toBe("#123456");
+    expect(tokens.bg).toBe("#ff00ff");
+    expect(tokens.invert).toBe(true);
+
+    // Same {hex}-commit-shape gotcha as appearance.ink/background above:
+    // a raw-string-only read would silently ignore a real user edit.
+    const objectShapeTokens = getHalftoneTokens({
+      "appearance.background": { hex: "#123456" },
+      "appearance.ink": { hex: "#ff00ff" },
+      "appearance.themeReversed": true,
+    });
+    expect(objectShapeTokens.ink).toBe("#123456");
+    expect(objectShapeTokens.bg).toBe("#ff00ff");
+
+    const offTokens = getHalftoneTokens({
+      "appearance.background": "#123456",
+      "appearance.ink": "#ff00ff",
+      "appearance.themeReversed": false,
+    });
+    expect(offTokens.ink).toBe("#ff00ff");
+    expect(offTokens.bg).toBe("#123456");
+    expect(offTokens.invert).toBe(false);
+  });
+});
+
+describe("engine: appearance.themeReversed mirrors the ramp index without touching buildRamp", () => {
+  /* The sentinel-edge proof: idx=0 is drawHalftone's hardcoded "draws
+     nothing" sentinel (pure background shows). Under invert, the mirror
+     is `levels - idxRaw`, so the two source extremes must swap which end
+     of the ramp they resolve to -- this is exactly the edge the rejected
+     "reverse buildRamp's target sweep" approach got wrong (that approach
+     left idx=0 meaning "draws nothing" unconditionally, so the darkest
+     source pixel would incorrectly land on the sentinel and show as pure
+     background instead of the densest pool). This proves the mirror gets
+     both extremes right, using the real drawHalftone/buildRamp, not a
+     hand-simulated calculation. */
+  function buildExtremesField(): Field {
+    // W=2, H=1: edgeField's loop only runs for 1 <= i < W-1 and
+    // 1 <= j < H-1, so at H=1 it never executes -- edge[k] is guaranteed
+    // zero for both cells with no special-casing needed.
+    return {
+      alive: new Uint8Array([1, 1]),
+      dep: null,
+      H: 1,
+      lum: new Float32Array([0, 1]), // cell 0 = darkest source, cell 1 = brightest
+      W: 2,
+    };
+  }
+
+  function baseInvertTestTokens(invert: boolean): Tokens {
+    return {
+      ...DEFAULT_TOKENS,
+      bg: "#000000",
+      bgCutoff: 0, // 0 < 0 is false, so raw=0 is not skipped before reaching idx
+      black: 0,
+      dither: 0, // isolate idx from dither jitter
+      edgeLift: 0,
+      gamma: 1,
+      ink: "#ffffff",
+      invert,
+      steps: 4,
+      white: 1,
+    };
+  }
+
+  function recordingCanvas(): { canvas: HTMLCanvasElement; fillTextCalls: { char: string; x: number }[] } {
+    const fillTextCalls: { char: string; x: number }[] = [];
+    const context = {
+      fillRect() {},
+      fillText(char: string, x: number) {
+        fillTextCalls.push({ char, x });
+      },
+      fillStyle: "",
+      font: "",
+      globalAlpha: 1,
+      setTransform() {},
+      textAlign: "center",
+      textBaseline: "middle",
+    };
+    const canvas = {
+      getContext: () => context,
+      height: 0,
+      style: {},
+      width: 0,
+    } as unknown as HTMLCanvasElement;
+    return { canvas, fillTextCalls };
+  }
+
+  it("engine: the brightest source pixel lands on the sentinel (draws nothing) under invert", () => {
+    const field = buildExtremesField();
+    const tokens = baseInvertTestTokens(true);
+    const { canvas, fillTextCalls } = recordingCanvas();
+
+    drawHalftone(canvas, field, tokens, { makeCanvas: createFakeCanvasFactory() });
+
+    const cellW = tokens.cellW;
+    const brightCellCalls = fillTextCalls.filter((call) => call.x >= cellW);
+    const darkCellCalls = fillTextCalls.filter((call) => call.x < cellW);
+
+    expect(
+      brightCellCalls.length,
+      "brightest source (idxRaw≈levels → mirrored to 0, the sentinel) must draw nothing -- only the background fill shows.",
+    ).toBe(0);
+    expect(
+      darkCellCalls.length,
+      "darkest source (idxRaw≈0 → mirrored to levels, the densest pool) must draw real glyphs under invert.",
+    ).toBeGreaterThan(0);
+  });
+
+  it("engine: the darkest source pixel lands on the densest pool under invert; both extremes are the exact opposite without invert", () => {
+    const field = buildExtremesField();
+    const cellW = baseInvertTestTokens(false).cellW;
+
+    const normal = recordingCanvas();
+    drawHalftone(normal.canvas, field, baseInvertTestTokens(false), {
+      makeCanvas: createFakeCanvasFactory(),
+    });
+    const normalBright = normal.fillTextCalls.filter((call) => call.x >= cellW).length;
+    const normalDark = normal.fillTextCalls.filter((call) => call.x < cellW).length;
+
+    // Without invert: bright source draws (dense pool), dark source is the
+    // sentinel (draws nothing) -- the baseline this feature must not change
+    // when the toggle is off.
+    expect(normalBright, "without invert, the brightest source must draw real glyphs.").toBeGreaterThan(0);
+    expect(normalDark, "without invert, the darkest source must be the sentinel (draws nothing).").toBe(0);
+
+    const inverted = recordingCanvas();
+    drawHalftone(inverted.canvas, field, baseInvertTestTokens(true), {
+      makeCanvas: createFakeCanvasFactory(),
+    });
+    const invertedBright = inverted.fillTextCalls.filter((call) => call.x >= cellW).length;
+    const invertedDark = inverted.fillTextCalls.filter((call) => call.x < cellW).length;
+
+    expect(invertedBright, "brightest source (idxRaw≈levels) mirrors to the sentinel under invert.").toBe(0);
+    expect(
+      invertedDark,
+      "darkest source (idxRaw≈0) mirrors to the densest pool under invert.",
+    ).toBeGreaterThan(0);
   });
 });
 
