@@ -19,17 +19,19 @@ export const appTransferMode: ToolcraftTransferMode = {
   mode: "reference-runtime-clone",
   referenceFeatureInventory: [
     {
-      acceptanceId: "source.scene",
+      acceptanceId: "source.mode",
       behaviorEvidence:
-        "renderScene(W,H,{scene,yaw,pitch,rim,lightDir}) in src/app/halftone.ts is unchanged from src/halftone.js; only type annotations were added.",
+        "renderScene(W,H,{scene,yaw,pitch,rim,lightDir}) in src/app/halftone.ts is unchanged from src/halftone.js; only type annotations were added. It is no longer reachable through a user-selectable dial, but resolveHalftoneEffectiveMode(mode, hasMedia) still returns 'scene' whenever hasMedia is false, so it stays the automatic no-media fallback -- the same dual role App.jsx itself gave it ('when source.mode === scene OR no media was loaded').",
       featureName: "Procedural scene source (raymarched sphere/torus/blob/stack)",
       id: "feature-source-scene",
       referenceBehavior:
         "App.jsx source.scene/yaw/pitch dials drove HT.renderScene() when source.mode === 'scene' or no media was loaded.",
       sourceEvidence: "App.jsx lines ~90-96, 229-236; src/halftone.js renderScene()/makeMap().",
-      status: "ported",
+      status: "intentionally-changed",
       toolcraftMapping:
-        "schema controls source.scene/source.yaw/source.pitch (visibleWhen source.mode='scene'), consumed by buildHalftoneField() -> renderScene().",
+        "The user-selectable Scene mode and its scene/yaw/pitch dials were removed from the schema; renderScene() remains wired only as buildHalftoneField()'s no-media fallback (via resolveHalftoneEffectiveMode), fixed at the reference's default scene/yaw/pitch values (stack/20/7) since there are no controls left to vary them.",
+      userApprovedChangeReason:
+        "Explicit user instruction for this migration: drop the procedural Scene source mode as a user-selectable option (and its scene/yaw/pitch dials, confirmed scene-only via buildHalftoneField's dispatch) so the product always starts from an uploaded image, while keeping the frozen engine's renderScene/SDF code in place since it stays referenced as the existing no-media fallback -- not rewriting engine algorithm code to remove it.",
     },
     {
       acceptanceId: "silhouette.threshold",
@@ -171,7 +173,7 @@ export const appProductReadiness: ToolcraftProductReadiness = {
   mode: "product",
   productName: "Binary Halftone",
   productSummary:
-    "Renders a procedural 3D scene or an uploaded image as a grid of glyphs, with tone carried by glyph choice, opacity, and character size.",
+    "Renders an uploaded image -- directly as bitmap luminance, or inflated into a lit 3D silhouette -- as a grid of glyphs, with tone carried by glyph choice, opacity, and character size.",
   requestedBehavior:
     "Port the existing framework-free binary-halftone engine into Toolcraft: type the engine as-is, then drive it entirely from Toolcraft schema controls, canvasContent, and runtime-owned upload/export/persistence/canvas-sizing surfaces.",
 };
@@ -180,8 +182,16 @@ export const appControlSectionInventory: readonly ToolcraftControlSectionInvento
   {
     entity: "Source",
     groupingReason:
-      "Mode selects which field pipeline runs; the fileDrop upload and the scene-only shape/yaw/pitch dials are the same source entity's dependent controls.",
-    targets: ["source.mode", "source.image", "source.scene", "source.yaw", "source.pitch"],
+      "source.image is unconditionally visible now (both remaining modes need it), so the runtime's layout normalizer always splits the always-visible fileDrop into its own standalone section; the mode select and the upload's custom-size overrides stay grouped as the same source entity's dependent controls.",
+    targets: ["source.image"],
+    title: "Image",
+    workflowStage: "source selection",
+  },
+  {
+    entity: "Source",
+    groupingReason:
+      "Mode selects which field pipeline runs; the upload's custom-size overrides are the same source entity's dependent controls. The fileDrop upload itself renders as the separate standalone Image section (see above) because it is unconditionally visible.",
+    targets: ["source.mode", "source.image.width", "source.image.height"],
     title: "Source",
     workflowStage: "source selection",
   },
@@ -217,6 +227,7 @@ export const appControlSectionInventory: readonly ToolcraftControlSectionInvento
       "character.customChars",
       "character.variety",
       "character.size",
+      "character.scale",
       "character.sizeVariation",
       "character.sizeSteps",
       "character.weight",
@@ -251,7 +262,7 @@ export const appControlSectionInventory: readonly ToolcraftControlSectionInvento
   {
     entity: "Light",
     groupingReason:
-      "Rim and the XYZ light direction feed the same shade() call used by both the procedural scene and the silhouette dome; hidden for the bitmap source, which has no normals.",
+      "Rim and the XYZ light direction feed the shade() call the silhouette dome uses to light its normals; hidden for the bitmap source, which has no normals. The same shade() call also lights the no-media fallback scene, but that fallback has no visible mode to select it through, so Light is scoped to inflate only.",
     targets: ["light.rim", "light.dirX", "light.dirY", "light.dirZ"],
     title: "Light",
     workflowStage: "lighting",
@@ -294,15 +305,15 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     componentType: "select",
     evidence: "product-output",
     expectedObservable:
-      "Switching Mode between Scene, Silhouette, and Image swaps which per-cell field pipeline (raymarch, silhouette inflate, or bitmap luminance) drives the rendered glyph grid.",
+      "Switching Mode between Image and Silhouette swaps which per-cell field pipeline (bitmap luminance or silhouette inflate) drives the rendered glyph grid.",
     fixture:
       "Default product state with a small uploaded source image attached; select each Mode option from the combobox.",
     id: "source.mode",
     kind: "control",
-    optionCoverage: ["scene", "inflate", "bitmap"],
+    optionCoverage: ["bitmap", "inflate"],
     referenceCoverage: "control-mapping",
     target: "source.mode",
-    userAction: "Open the Mode select and choose Scene, Silhouette, or Image.",
+    userAction: "Open the Mode select and choose Image or Silhouette.",
   },
   {
     automated: true,
@@ -322,55 +333,38 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     target: "source.image",
     userAction:
       "Drop or browse an image file into the Image control, then use its rotate/flip actions, its Remove action, or the Source section's Reset action.",
-    visibilityCoverage: "all-conditional-visibility",
   },
   {
     automated: true,
-    automatedTestName: getHalftoneEngineTestName("source.scene"),
+    automatedTestName: getHalftoneEngineTestName("source.image.width"),
     browser: true,
-    browserTestName: "browser: source.scene changes rendered output",
-    componentType: "select",
+    browserTestName:
+      "browser: source.image.width/height compose with placement.fit without stretching the source",
+    componentType: "text",
     evidence: "product-output",
     expectedObservable:
-      "Selecting a different Shape (Stack/Sphere/Torus/Blob) changes the raymarched distance field and the rendered glyph grid.",
-    fixture: "Default product state (Scene mode); select each Shape option from the combobox.",
-    id: "source.scene",
+      "Setting a custom source width changes the effective source size fed into placeImage (through srcDims), changing the rendered glyph grid; a non-square custom size does not stretch the output because the existing cellAspect pre-division and placement.fit (contain/cover/stretch) still govern the result.",
+    fixture:
+      "Upload a real image while Mode is Image; set a non-square custom Width/Height pair (e.g. 400x100) with Fit set to Contain.",
+    id: "source.image.width",
     kind: "control",
-    optionCoverage: ["stack", "sphere", "torus", "blob"],
-    referenceCoverage: "renderer-state",
-    target: "source.scene",
-    userAction: "Open the Shape select and choose a different shape.",
-    visibilityCoverage: "all-conditional-visibility",
+    target: "source.image.width",
+    userAction: "Type a custom width into the Custom Width field.",
   },
   {
     automated: true,
-    automatedTestName: getHalftoneEngineTestName("source.yaw"),
+    automatedTestName: getHalftoneEngineTestName("source.image.height"),
     browser: true,
-    browserTestName: "browser: source.yaw changes rendered output",
-    componentType: "slider",
+    browserTestName: "browser: source.image.height changes rendered output",
+    componentType: "text",
     evidence: "product-output",
-    expectedObservable: "Dragging Yaw rotates the camera around the procedural scene, changing the rendered glyph grid.",
-    fixture: "Default product state (Scene mode); drag the Yaw slider.",
-    id: "source.yaw",
+    expectedObservable:
+      "Setting a custom source height changes the effective source size fed into placeImage (through srcDims), changing the rendered glyph grid.",
+    fixture: "Upload a real image while Mode is Image; type a different value into the Custom Height field.",
+    id: "source.image.height",
     kind: "control",
-    target: "source.yaw",
-    userAction: "Drag the Yaw slider.",
-    visibilityCoverage: "all-conditional-visibility",
-  },
-  {
-    automated: true,
-    automatedTestName: getHalftoneEngineTestName("source.pitch"),
-    browser: true,
-    browserTestName: "browser: source.pitch changes rendered output",
-    componentType: "slider",
-    evidence: "product-output",
-    expectedObservable: "Dragging Pitch tilts the camera over the procedural scene, changing the rendered glyph grid.",
-    fixture: "Default product state (Scene mode); drag the Pitch slider.",
-    id: "source.pitch",
-    kind: "control",
-    target: "source.pitch",
-    userAction: "Drag the Pitch slider.",
-    visibilityCoverage: "all-conditional-visibility",
+    target: "source.image.height",
+    userAction: "Type a custom height into the Custom Height field.",
   },
 
   // ---------- Placement ----------
@@ -589,6 +583,22 @@ export const appAcceptance: readonly ToolcraftComponentAcceptance[] = [
     kind: "control",
     target: "character.size",
     userAction: "Drag the Size slider.",
+  },
+  {
+    automated: true,
+    automatedTestName: getHalftoneEngineTestName("character.scale"),
+    browser: true,
+    browserTestName: "browser: the tone ramp stays monotonic across character.scale values",
+    componentType: "slider",
+    evidence: "product-output",
+    expectedObservable:
+      "Dragging Scale multiplies into charSize's cell-filling fraction (never past the clamp that keeps glyphs inside their cell) and re-measures glyph ink coverage at the new effective size, changing the rendered glyph grid without inverting the tone ramp's gradient at any scale value.",
+    fixture:
+      "Full-range gradient uploaded as the Image source (Cover fit, zoom 1); drag the Scale slider across its range and re-check ramp monotonicity at each value.",
+    id: "character.scale",
+    kind: "control",
+    target: "character.scale",
+    userAction: "Drag the Scale slider.",
   },
   {
     automated: true,

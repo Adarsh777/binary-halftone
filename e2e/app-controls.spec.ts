@@ -8,10 +8,7 @@ import {
 } from "./browser-acceptance-outcome-helpers";
 import { expectToolcraftPersistenceState } from "./browser-state-evidence-helpers";
 import { attachToolcraftBrowserRuntimeEvidence } from "./browser-runtime-evidence";
-import {
-  countToolcraftControlOwnersByTarget,
-  getToolcraftControlFieldByTarget,
-} from "./browser-control-target-helpers";
+import { getToolcraftControlFieldByTarget } from "./browser-control-target-helpers";
 import { clickToolcraftPanelActionByLabel } from "./performance-output-action-helpers";
 import {
   dragToolcraftSliderByTarget,
@@ -26,9 +23,16 @@ import {
   createGradientFixturePng,
   createOrientedFixturePng,
   createSmallFixturePng,
+  createSolidColorPng,
+  decodePng,
+  findContentBoundingBox,
+  findMostCommonPixelCoordinate,
+  getPngPixelAt,
   HALFTONE_CONTROL_CONFIGS,
   selectHalftoneGateOption,
+  switchSourceMode,
   uploadHalftoneFixtureImage,
+  type DecodedPng,
 } from "./halftone-fixtures";
 
 test("browser: app opens as a real Toolcraft product with the Source-to-Image Export panel", async ({
@@ -42,6 +46,71 @@ test("browser: app opens as a real Toolcraft product with the Source-to-Image Ex
   await expect(page.locator('[data-toolcraft-control-target="source.mode"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "Export PNG", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy Tokens", exact: true })).toBeVisible();
+});
+
+/* Task 2 (default preview = upload-image placeholder): on first load, before
+   any upload, the product-output canvas must render the runtime-sanctioned
+   no-media fallback (the frozen engine's renderScene, via
+   resolveHalftoneEffectiveMode's hasMedia branch) -- not a blank canvas and
+   not an app-invented placeholder drawn on the canvas (forbidden by
+   component-contracts.media-custom.ts's doNotReplaceWith rules). This proves
+   the canvas has real pixel dimensions and non-uniform pixel content on a
+   fresh page load with no media attached. */
+test("browser: first load with no media renders real (non-blank) product output, not a blank canvas", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const canvas = page.locator("[data-toolcraft-product-output]");
+  await expect(canvas).toBeVisible();
+
+  // Downscale the *whole* canvas into a small sample (as
+  // getToolcraftProductObservableSnapshot does) rather than cropping a
+  // corner -- a corner crop can land entirely on background and read as
+  // uniform even when the rest of the canvas has real rendered content.
+  const sampleCanvas = (element: Element) => {
+    const canvasElement = element as HTMLCanvasElement;
+    const { height, width } = canvasElement;
+    const sampleWidth = Math.min(64, width);
+    const sampleHeight = Math.min(64, height);
+    const sample = document.createElement("canvas");
+    sample.width = sampleWidth;
+    sample.height = sampleHeight;
+    const sampleCtx = sample.getContext("2d", { willReadFrequently: true })!;
+    sampleCtx.drawImage(canvasElement, 0, 0, sampleWidth, sampleHeight);
+    const pixels = sampleCtx.getImageData(0, 0, sampleWidth, sampleHeight).data;
+    const [firstR, firstG, firstB, firstA] = pixels;
+    let isUniform = true;
+
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (
+        pixels[index] !== firstR ||
+        pixels[index + 1] !== firstG ||
+        pixels[index + 2] !== firstB ||
+        pixels[index + 3] !== firstA
+      ) {
+        isUniform = false;
+        break;
+      }
+    }
+
+    return { height, isUniform, width };
+  };
+
+  // The canvas mounts visible before its first render pass paints the
+  // no-media fallback, so poll (like every other product-observable check
+  // in this file) instead of sampling once right after toBeVisible().
+  await expect(async () => {
+    const { isUniform } = await canvas.evaluate(sampleCanvas);
+    expect(
+      isUniform,
+      "product-output canvas should render real (non-blank) content via the no-media fallback on first load, before any upload",
+    ).toBe(false);
+  }).toPass({ timeout: 5000 });
+
+  const { height, width } = await canvas.evaluate(sampleCanvas);
+  expect(width, "product-output canvas should have real pixel dimensions on first load").toBeGreaterThan(0);
+  expect(height, "product-output canvas should have real pixel dimensions on first load").toBeGreaterThan(0);
 });
 
 /* referenceFeatureInventory feature-presets/feature-video-source document
@@ -62,7 +131,7 @@ test("browser: named presets and video-as-source stay excluded; Settings Transfe
   const modeField = await getToolcraftControlFieldByTarget(page, "source.mode");
   await modeField.getByRole("combobox").click();
   const optionLabels = await page.locator('[role="option"]').allTextContents();
-  expect(optionLabels.map((label) => label.trim())).toEqual(["Scene", "Silhouette", "Image"]);
+  expect(optionLabels.map((label) => label.trim())).toEqual(["Image", "Silhouette"]);
   await page.keyboard.press("Escape");
 
   await expect(page.getByRole("button", { name: /video/i })).toHaveCount(0);
@@ -84,12 +153,13 @@ for (const config of HALFTONE_CONTROL_CONFIGS) {
 
     if (config.requiresSourceMode) {
       const visibleLabel = config.requiresSourceMode === "inflate" ? "Silhouette" : "Image";
+      const hiddenLabel = config.requiresSourceMode === "inflate" ? "Image" : "Silhouette";
       await selectHalftoneGateOption(page, "source.mode", visibleLabel);
       await expectToolcraftConditionalControlVisibility(
         session,
         session.controlAction("source.mode", async (control) => {
           await control.getByRole("combobox").click();
-          await page.locator('[role="option"]').filter({ hasText: "Scene" }).first().click();
+          await page.locator('[role="option"]').filter({ hasText: hiddenLabel }).first().click();
         }),
         session.controlAction("source.mode", async (control) => {
           await control.getByRole("combobox").click();
@@ -125,11 +195,11 @@ for (const config of HALFTONE_CONTROL_CONFIGS) {
     }
 
     if (config.requiresMedia) {
-      /* source.image is itself visibleWhen source.mode !== "scene", so a
-         control whose own config only declares requiresMedia (no
-         requiresSourceMode/requiresSourceModeContext gate of its own, e.g.
-         source.mode) must first reveal the fileDrop before it can be
-         uploaded into. */
+      /* source.image is unconditionally visible, but a control whose own
+         config only declares requiresMedia (no requiresSourceMode/
+         requiresSourceModeContext gate of its own, e.g. source.mode itself)
+         still needs a real source mode active before uploading reaches the
+         field pipeline instead of the no-media fallback. */
       if (!config.requiresSourceMode && !config.requiresSourceModeContext) {
         await selectHalftoneGateOption(page, "source.mode", "Image");
       }
@@ -160,8 +230,9 @@ for (const config of HALFTONE_CONTROL_CONFIGS) {
 }
 
 /* Media lifecycle for source.image (an image fileDrop control): upload only
-   changes rendered output once source.mode reads media (Image/Silhouette),
-   since Scene mode never looks at mediaAssets. Rotate/flip are the runtime's
+   changes rendered output once source.mode reads media (Image/Silhouette);
+   with no media attached, the field pipeline falls back to the fixed
+   no-media scene render instead. Rotate/flip are the runtime's
    built-in FileDrop image-transform actions (aria-labels "90° Right"/"Flip
    horizontal"), which bake into media.transform and are consumed by
    halftone-image.ts's placeImage before the engine samples the source.
@@ -233,10 +304,14 @@ test("browser: source.image lifecycle covers upload, rotate, flip, remove, and r
   await uploadHalftoneFixtureImage(page);
   await expect(page.getByRole("img", { name: "halftone-fixture.png" })).toBeVisible();
 
+  // source.image renders in its own auto-split "Image" section (fileDrop's
+  // standalone section layout, since it is now unconditionally visible with
+  // no visibleWhen to keep it grouped with "Source"), so its reset button is
+  // scoped to "Reset Image section", not "Reset Source section".
   await expectToolcraftProductObservableToChange(
     session,
     session.controlAction("source.image", async (_control, currentPage) => {
-      await currentPage.getByRole("button", { name: "Reset Source section" }).click();
+      await currentPage.getByRole("button", { name: "Reset Image section" }).click();
     }),
     { requirementId: "source.image.reset" },
   );
@@ -248,48 +323,6 @@ test("browser: source.image lifecycle covers upload, rotate, flip, remove, and r
   });
 });
 
-/* source.scene/source.yaw/source.pitch are visibleWhen source.mode equals
-   "scene" -- the opposite gating direction from source.image (visible only
-   in Scene mode, hidden once a media-driven mode is selected). This proves
-   both directions for that shared gate. */
-test("browser: Shape/Yaw/Pitch hide once a media-driven source mode is selected", async ({
-  page,
-}) => {
-  await page.goto("/");
-
-  const gatedTargets = ["source.scene", "source.yaw", "source.pitch"] as const;
-
-  for (const target of gatedTargets) {
-    expect(await countToolcraftControlOwnersByTarget(page, target)).toBe(1);
-    await attachToolcraftBrowserRuntimeEvidence({
-      evidenceType: "conditional-control-visible",
-      requirementId: `${target}.visibility`,
-      target,
-    });
-  }
-
-  await selectHalftoneGateOption(page, "source.mode", "Image");
-
-  for (const target of gatedTargets) {
-    expect(await countToolcraftControlOwnersByTarget(page, target)).toBe(0);
-    await attachToolcraftBrowserRuntimeEvidence({
-      evidenceType: "conditional-control-hidden",
-      requirementId: `${target}.visibility`,
-      target,
-    });
-  }
-
-  await selectHalftoneGateOption(page, "source.mode", "Scene");
-
-  for (const target of gatedTargets) {
-    expect(await countToolcraftControlOwnersByTarget(page, target)).toBe(1);
-    await attachToolcraftBrowserRuntimeEvidence({
-      evidenceType: "conditional-control-visible",
-      requirementId: `${target}.visibility`,
-      target,
-    });
-  }
-});
 
 /* The tone ramp (buildRamp) is proven monotonic at the engine level in
    halftone-engine.test.ts (every level's mean ink value trends upward with
@@ -355,6 +388,161 @@ test("browser: the tone ramp renders a monotonic ink sweep across a full-range g
     bandInkCounts[bandInkCounts.length - 1],
     `The brightest band (bottom) must render more ink than the darkest band (top); bands top-to-bottom: ${bandInkCounts.join(", ")}.`,
   ).toBeGreaterThan(bandInkCounts[0]);
+});
+
+async function measureGradientBandInkCounts(page: import("@playwright/test").Page): Promise<number[]> {
+  const canvas = page.locator("[data-toolcraft-product-output]");
+  return canvas.evaluate((element) => {
+    const canvasElement = element as HTMLCanvasElement;
+    const ctx = canvasElement.getContext("2d", { willReadFrequently: true })!;
+    const { width, height } = canvasElement;
+    const bandCount = 8;
+    const bandHeight = Math.floor(height / bandCount);
+    const counts: number[] = [];
+
+    for (let band = 0; band < bandCount; band += 1) {
+      const { data } = ctx.getImageData(0, band * bandHeight, width, bandHeight);
+      let inkPixels = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        const alpha = data[i + 3];
+        if (alpha > 10 && brightness > 60) inkPixels += 1;
+      }
+      counts.push(inkPixels);
+    }
+
+    return counts;
+  });
+}
+
+/* character.scale composes into charSize's coverage-driven tone ramp (see
+   halftone-core.ts's getHalftoneEffectiveFill/inkCoverage): coverage is now
+   measured at the *actual* effective size, not a fixed reference, so it
+   must never silently shift the ramp's sort order or invert the gradient
+   at any scale value -- the same monotonic-sweep proof as the base ramp
+   test, repeated across the scale axis. */
+test("browser: the tone ramp stays monotonic across character.scale values", async ({ page }) => {
+  await page.goto("/");
+  await selectHalftoneGateOption(page, "source.mode", "Image");
+  await uploadHalftoneFixtureImage(page, createGradientFixturePng());
+  await selectHalftoneGateOption(page, "placement.fit", "Cover");
+  await dragToolcraftSliderByTarget(page, "placement.zoom", 1);
+
+  const canvas = page.locator("[data-toolcraft-product-output]");
+  await expect(canvas).toBeVisible();
+
+  for (const scaleRatio of [1, 0.5, 0]) {
+    await dragToolcraftSliderByTarget(page, "character.scale", scaleRatio);
+    const bandInkCounts = await measureGradientBandInkCounts(page);
+
+    expect(
+      bandInkCounts.some((count) => count > 0),
+      `character.scale ratio ${scaleRatio}: full-range gradient upload must render at least some ink so band comparisons are meaningful.`,
+    ).toBe(true);
+
+    const tolerance = Math.max(4, Math.round(Math.max(...bandInkCounts) * 0.03));
+    for (let band = 1; band < bandInkCounts.length; band += 1) {
+      expect(
+        bandInkCounts[band],
+        `character.scale ratio ${scaleRatio}: ink density band ${band} (${bandInkCounts[band]} px) must not be a meaningful reversal from the darker band ${band - 1} above it (${bandInkCounts[band - 1]} px); bands top-to-bottom: ${bandInkCounts.join(", ")}.`,
+      ).toBeGreaterThanOrEqual(bandInkCounts[band - 1] - tolerance);
+    }
+
+    expect(
+      bandInkCounts[bandInkCounts.length - 1],
+      `character.scale ratio ${scaleRatio}: the brightest band (bottom) must render more ink than the darkest band (top); bands top-to-bottom: ${bandInkCounts.join(", ")}.`,
+    ).toBeGreaterThan(bandInkCounts[0]);
+  }
+
+  await attachToolcraftBrowserRuntimeEvidence({
+    evidenceType: "product-output",
+    requirementId: "character.scale",
+  });
+});
+
+/* "Never overflow the cell" is a claim about the actual rasterized font
+   size (fitSize * fill * scale, see halftone-core.ts/halftone-draw.ts), not
+   about where ink happens to land -- and a live pixel-boundary scan can't
+   reliably tell a real overflow apart from the grid's own cell-quantization
+   noise (both are on the same ~1-cell order of magnitude). The direct,
+   deterministic proof instead reads the *actual* `ctx.font` size-in-px the
+   live app just rasterized with at the worst-case settings (max charSize,
+   max scale, zero sizeVariation so every glyph shares that one size), and
+   independently re-measures the same font's metrics (the same technique
+   fontFit uses) to compute the true "exactly fills the cell" ceiling for
+   comparison -- so the check can't drift out of sync with the engine's own
+   cellW/cellAspect at test-authoring time. */
+test("browser: glyphs never overflow their cell at max character.scale", async ({ page }) => {
+  await page.goto("/");
+  await selectHalftoneGateOption(page, "source.mode", "Image");
+  await uploadHalftoneFixtureImage(page, createSmallFixturePng());
+
+  // Worst case for cell overflow: every size axis pushed to its maximum at
+  // once, with sizeVariation at 0 so every glyph (including whichever one
+  // last set ctx.font) renders at that one full size.
+  await dragToolcraftSliderByTarget(page, "character.size", 1);
+  await dragToolcraftSliderByTarget(page, "character.sizeVariation", 0);
+  // character.scale's default already IS its schema max (1) -- dragging to
+  // ratio 1 would be a same-value collision, and dragToolcraftSliderByTarget
+  // retries a same-value drag from the *opposite* end (landing near the
+  // minimum instead). Verify it's already at max rather than drag it.
+  const scaleField = await getToolcraftControlFieldByTarget(page, "character.scale");
+  await expect(scaleField.getByRole("slider")).toHaveAttribute("aria-valuenow", "1");
+
+  const canvas = page.locator("[data-toolcraft-product-output]");
+  await expect(canvas).toBeVisible();
+
+  const { cellAspect, cellW, fontPx, fontPxOverCeiling } = await canvas.evaluate((element) => {
+    const canvasElement = element as HTMLCanvasElement;
+    const ctx = canvasElement.getContext("2d")!;
+    const fontString = ctx.font;
+    const sizeMatch = /([\d.]+)px/.exec(fontString);
+    const fontPx = sizeMatch ? Number(sizeMatch[1]) : Number.NaN;
+    // The canvas font getter canonicalizes the shorthand and omits the
+    // weight token entirely when it's "normal" (400), so the weight
+    // prefix must be optional here, not assumed present.
+    const fontFamily = fontString.replace(/^(?:\S+\s+)?[\d.]+px\s+/, "");
+
+    // Re-derive the engine's own "exactly fills the cell" ceiling
+    // (fontFit + fitFontSize in halftone-core.ts) independently, using the
+    // font family the live render actually used.
+    const probe = document.createElement("canvas");
+    probe.width = 8;
+    probe.height = 8;
+    const probeCtx = probe.getContext("2d")!;
+    const REF = 100;
+    probeCtx.font = `400 ${REF}px ${fontFamily}`;
+    const metrics = probeCtx.measureText("0");
+    const advance = metrics.width > 0 ? metrics.width / REF : 0.6;
+    const ascent = metrics.actualBoundingBoxAscent;
+    const descent = metrics.actualBoundingBoxDescent;
+    const ink = Number.isFinite(ascent) && Number.isFinite(descent) && ascent + descent > 0
+      ? (ascent + descent) / REF
+      : 0.72;
+
+    const cellW = 8;
+    const cellAspect = 1.35; // defaults; this test never touches grid controls
+    const cellH = cellW * cellAspect;
+    const ceilingPx = Math.min(cellW / advance, cellH / ink);
+
+    return { cellAspect, cellW, fontPx, fontPxOverCeiling: fontPx - ceilingPx };
+  });
+
+  expect(Number.isFinite(fontPx), `ctx.font must expose a real px size after a render; got "${fontPx}".`).toBe(true);
+  expect(cellW).toBe(8);
+  expect(cellAspect).toBe(1.35);
+  // A small float-precision allowance (the live render's dpr scale factor
+  // vs. this test's un-scaled cellW/cellH re-derivation can differ by a
+  // fraction of a px), not a meaningful overflow margin.
+  expect(
+    fontPxOverCeiling,
+    `Rasterized font size (${fontPx}px) must not exceed the cell-filling ceiling by more than float rounding -- overshoot ${fontPxOverCeiling.toFixed(3)}px means a glyph spilled past its cell at max charSize/scale.`,
+  ).toBeLessThanOrEqual(0.5);
+
+  await attachToolcraftBrowserRuntimeEvidence({
+    evidenceType: "product-output",
+    requirementId: "character.scale",
+  });
 });
 
 /* halftone-draw.ts's ordered-dither offset is tapered to zero within one
@@ -570,12 +758,36 @@ test("browser: ink color reaches rendered pixels through the full tone-bucketed 
   ).toBeGreaterThan(inkCounts[0]!);
 });
 
+async function downloadAndReadExportedPng(page: import("@playwright/test").Page): Promise<Buffer> {
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    clickToolcraftPanelActionByLabel(page, "Export PNG"),
+  ]);
+  const path = await download.path();
+  if (!path) throw new Error("Export PNG did not produce a downloadable file.");
+  const fs = await import("node:fs/promises");
+  return fs.readFile(path);
+}
+
 test("browser: export.includeBackground hides the live preview background and produces a transparent PNG", async ({
   page,
 }) => {
   await page.goto("/");
   const toggleField = page.locator('[data-toolcraft-control-target="export.includeBackground"]');
   const toggle = toggleField.getByRole("switch");
+
+  // Export once with the background included (the default state) so we know,
+  // pixel-for-pixel, which coordinates are background fill vs. real ink --
+  // the halftone grid tiles the whole canvas, so there is no coordinate known
+  // in advance to be "background" without inspecting an opaque render first.
+  const withBackgroundBytes = await downloadAndReadExportedPng(page);
+  const withBackgroundPng = decodePng(withBackgroundBytes);
+  const backgroundCoordinate = findMostCommonPixelCoordinate(withBackgroundPng);
+  const backgroundColor = getPngPixelAt(withBackgroundPng, backgroundCoordinate.x, backgroundCoordinate.y);
+  const inkCoordinate = findMostCommonPixelCoordinate(
+    withBackgroundPng,
+    (pixel) => pixel.r !== backgroundColor.r || pixel.g !== backgroundColor.g || pixel.b !== backgroundColor.b,
+  );
 
   const withBackground = await getToolcraftProductObservableSnapshot(page);
   await toggle.click();
@@ -584,30 +796,92 @@ test("browser: export.includeBackground hides the live preview background and pr
     .not.toBe(withBackground);
 
   const artifact = await expectToolcraftExportedArtifact(
-    async () => {
-      const [download] = await Promise.all([
-        page.waitForEvent("download"),
-        clickToolcraftPanelActionByLabel(page, "Export PNG"),
-      ]);
-      const path = await download.path();
-      if (!path) throw new Error("Export PNG did not produce a downloadable file.");
-      const fs = await import("node:fs/promises");
-      return fs.readFile(path);
-    },
-    (bytes: Buffer) => {
-      const colorType = bytes.readUInt8(25);
+    async () => decodePng(await downloadAndReadExportedPng(page)),
+    (decoded: DecodedPng) => {
+      const backgroundPixel = getPngPixelAt(decoded, backgroundCoordinate.x, backgroundCoordinate.y);
+      const inkPixel = getPngPixelAt(decoded, inkCoordinate.x, inkCoordinate.y);
+
+      expect(
+        backgroundPixel.a,
+        "Excluding the background must make the background region genuinely transparent (alpha 0), not merely black or white.",
+      ).toBe(0);
+      expect(
+        // Glyph edges are anti-aliased (partial ink coverage blends with
+        // whatever is behind them), so an edge pixel's alpha can land below
+        // 255 even though the glyph itself is fully opaque ink; only assert
+        // it isn't ALSO wiped to transparent by excluding the background.
+        inkPixel.a,
+        "Excluding the background must keep the halftone ink glyphs visible (non-transparent).",
+      ).toBeGreaterThan(0);
+
       return {
-        // PNG color type 6 (RGBA) or 4 (grayscale+alpha) carries an alpha
-        // channel; that is how a transparent-background export is proven.
-        byteLength: bytes.byteLength,
-        height: bytes.readUInt32BE(20),
+        byteLength: withBackgroundBytes.byteLength,
+        height: decoded.height,
         mediaType: "image/png",
-        width: colorType === 6 || colorType === 4 ? bytes.readUInt32BE(16) : 0,
+        width: decoded.width,
       };
     },
     { requirementId: "export.includeBackground" },
   );
-  expect(artifact.byteLength).toBeGreaterThan(0);
+  expect(artifact.height).toBeGreaterThan(0);
+  expect(artifact.width).toBeGreaterThan(0);
+});
+
+/* placeImage pre-divides the source height by cellAspect specifically so a
+   fit computed in cell-space survives the later per-cell pixel-space
+   render without stretching (see halftone-image.ts). A custom source size
+   must reach that same correction through srcDims, not a separate scale --
+   this is the live, pixel-measured proof: a drastically non-square custom
+   size (1600x400, a 4:1 rectangle) under Fit=Contain must letterbox at its
+   true 4:1 aspect in the exported PNG's real pixels, not at ~2.96:1 or
+   5.4:1 (the documented bug's exact off-by-cellAspect shapes, since the
+   default cellAspect is 1.35).
+
+   Sized well above MIN_GRID_CELLS*cellHeight (24*10.8=~260px) on both
+   axes deliberately: the source-resize also now re-derives the runtime
+   canvas size (see halftone-canvas.tsx), and a height as small as 100px
+   would floor to the grid's 24-cell minimum, distorting the *canvas's own*
+   aspect away from the true 4:1 and confounding this test's proof with
+   that unrelated, expected floor-clamp behavior. */
+test("browser: source.image.width/height compose with placement.fit without stretching the source", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await switchSourceMode(page, "bitmap");
+  await uploadHalftoneFixtureImage(page, createSmallFixturePng());
+  await selectHalftoneGateOption(page, "placement.fit", "Contain");
+
+  const widthField = await getToolcraftControlFieldByTarget(page, "source.image.width");
+  await widthField.getByRole("textbox").fill("1600");
+  await widthField.getByRole("textbox").press("Tab");
+  const heightField = await getToolcraftControlFieldByTarget(page, "source.image.height");
+  await heightField.getByRole("textbox").fill("400");
+  await heightField.getByRole("textbox").press("Tab");
+  await expect(widthField.getByRole("textbox")).toHaveValue("1600");
+  await expect(heightField.getByRole("textbox")).toHaveValue("400");
+
+  const bytes = await downloadAndReadExportedPng(page);
+  const decoded = decodePng(bytes);
+  const backgroundCoordinate = findMostCommonPixelCoordinate(decoded);
+  const backgroundColor = getPngPixelAt(decoded, backgroundCoordinate.x, backgroundCoordinate.y);
+  const bbox = findContentBoundingBox(decoded, backgroundColor);
+  const observedAspect = bbox.width / bbox.height;
+  const trueAspect = 1600 / 400;
+  const cellAspect = 1.35;
+
+  expect(
+    observedAspect,
+    `Rendered content aspect ${observedAspect.toFixed(2)} must match the custom source's true 4:1 aspect, not be stretched by cellAspect.`,
+  ).toBeCloseTo(trueAspect, 0);
+  // A stretched render would land near trueAspect / cellAspect or
+  // trueAspect * cellAspect instead -- assert we're nowhere near either.
+  expect(Math.abs(observedAspect - trueAspect / cellAspect)).toBeGreaterThan(0.5);
+  expect(Math.abs(observedAspect - trueAspect * cellAspect)).toBeGreaterThan(0.5);
+
+  await attachToolcraftBrowserRuntimeEvidence({
+    evidenceType: "product-output",
+    requirementId: "source.image.width",
+  });
 });
 
 test("browser: Export PNG downloads a real decodable PNG", async ({ page }) => {
@@ -686,7 +960,7 @@ test("browser: export.image.resolution changes the exported file's real pixel di
 }) => {
   await page.goto("/");
 
-  async function exportPngWidth(): Promise<number> {
+  async function exportPngDimensions(): Promise<{ height: number; width: number }> {
     const [download] = await Promise.all([
       page.waitForEvent("download"),
       clickToolcraftPanelActionByLabel(page, "Export PNG"),
@@ -695,19 +969,75 @@ test("browser: export.image.resolution changes the exported file's real pixel di
     if (!path) throw new Error("Export PNG did not produce a downloadable file.");
     const fs = await import("node:fs/promises");
     const bytes = await fs.readFile(path);
-    return bytes.readUInt32BE(16);
+    return { height: bytes.readUInt32BE(20), width: bytes.readUInt32BE(16) };
   }
 
   await selectHalftoneGateOption(page, "export.image.resolution", "2K");
-  const width2k = await exportPngWidth();
+  const { width: width2k } = await exportPngDimensions();
 
   await selectHalftoneGateOption(page, "export.image.resolution", "8K");
-  const width8k = await exportPngWidth();
+  const { width: width8k } = await exportPngDimensions();
 
   expect(
     width8k,
     `8K export width (${width8k}px) must be substantially larger than 2K export width (${width2k}px).`,
   ).toBeGreaterThan(width2k * 3);
+});
+
+/* The runtime canvas size drives cols/rows (getHalftoneGridSize), and must
+   itself be driven FROM the uploaded image (see halftone-canvas.tsx's
+   canvas.setSize effect / getHalftoneCanvasSizeForSource in
+   halftone-field.ts), not stay at the fixed 1920x1080 runtime default with
+   the image merely fitted inside it. Output is whole cells only (cols =
+   floor(imageW / cellWidth), rows = floor(imageH / (cellWidth *
+   cellAspect))), so this lands within one cell of the uploaded image's real
+   pixel size, not an exact pixel match -- that's the documented,
+   predictable behavior, not drift. A non-square image (640x360, 16:9)
+   additionally proves the derived canvas preserves that aspect instead of
+   being silently squared off or stretched. */
+test("browser: uploading an image drives the runtime canvas size to match it", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await selectHalftoneGateOption(page, "source.mode", "Image");
+  await uploadHalftoneFixtureImage(page, createSolidColorPng(640, 360));
+
+  const canvasWidthField = await getToolcraftControlFieldByTarget(page, "canvas.size.width");
+  const canvasHeightField = await getToolcraftControlFieldByTarget(page, "canvas.size.height");
+  await expect
+    .poll(async () => Number(await canvasWidthField.getByRole("textbox").inputValue()))
+    .not.toBe(1920);
+  const canvasWidth = Number(await canvasWidthField.getByRole("textbox").inputValue());
+  const canvasHeight = Number(await canvasHeightField.getByRole("textbox").inputValue());
+
+  // Default grid.cellWidth/grid.cellAspect (this test doesn't touch them).
+  const cellWidth = 8;
+  const cellAspect = 1.35;
+  const cellHeight = cellWidth * cellAspect;
+  const expectedCols = Math.min(300, Math.max(24, Math.floor(640 / cellWidth)));
+  const expectedRows = Math.min(300, Math.max(24, Math.floor(360 / cellHeight)));
+  const expectedWidth = Math.round(expectedCols * cellWidth);
+  const expectedHeight = Math.round(expectedRows * cellHeight);
+
+  expect(
+    canvasWidth,
+    `Runtime canvas width (${canvasWidth}px) must equal the whole-cell grid derived from the uploaded 640px-wide image (expected ${expectedWidth}px).`,
+  ).toBe(expectedWidth);
+  expect(
+    canvasHeight,
+    `Runtime canvas height (${canvasHeight}px) must equal the whole-cell grid derived from the uploaded 360px-tall image (expected ${expectedHeight}px).`,
+  ).toBe(expectedHeight);
+  expect(
+    Math.abs(canvasWidth - 640),
+    `Canvas width (${canvasWidth}px) must land within one cell (${cellWidth}px) of the uploaded image's real width (640px).`,
+  ).toBeLessThanOrEqual(cellWidth);
+  expect(
+    Math.abs(canvasHeight - 360),
+    `Canvas height (${canvasHeight}px) must land within one cell (${cellHeight}px) of the uploaded image's real height (360px).`,
+  ).toBeLessThanOrEqual(cellHeight);
+  // Non-square source: the derived canvas must preserve that aspect, not
+  // square it off or otherwise distort it.
+  expect(canvasWidth / canvasHeight).toBeCloseTo(640 / 360, 1);
 });
 
 test("browser: Copy Tokens writes the current engine token set to the clipboard", async ({

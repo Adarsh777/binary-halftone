@@ -1,12 +1,13 @@
 import type { ToolcraftState } from "@/toolcraft/runtime";
 
 import { type CanvasFactory, type Field, type HalftoneSourceMedia, type Tokens } from "./halftone";
-import { buildHalftoneField, getHalftoneGridSize } from "./halftone-field";
+import { applyHalftoneSourceResize, buildHalftoneField, getHalftoneGridSize } from "./halftone-field";
 import {
   getHalftoneInflateOptions,
   getHalftonePlacement,
   getHalftoneSceneOptions,
   getHalftoneSourceMode,
+  getHalftoneSourceSize,
   getHalftoneTokens,
 } from "./halftone-tokens";
 
@@ -35,6 +36,9 @@ export function computeHalftoneRenderPlan(
     tokens.cellW,
     tokens.cellAspect,
   );
+  const resizedMedia = media
+    ? applyHalftoneSourceResize(media, getHalftoneSourceSize(state.values), makeCanvas)
+    : media;
 
   const field = buildHalftoneField({
     bgCutoff: tokens.bgCutoff,
@@ -42,7 +46,7 @@ export function computeHalftoneRenderPlan(
     inflateOptions,
     lightDir: tokens.lightDir,
     makeCanvas,
-    media,
+    media: resizedMedia,
     mode,
     pitch: scene.pitch,
     place: { ...placement, cellAspect: tokens.cellAspect },

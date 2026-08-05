@@ -61,13 +61,14 @@ describe("appSchema", () => {
     expect(appSchema.assembly.commands).not.toContain("timeline.setCurrentTime");
   });
 
-  it("groups product controls into the Source/Placement/Silhouette/Character/Grid/Tone/Light/Ink/Background/Image Export sections", () => {
+  it("groups product controls into the Image/Source/Placement/Silhouette/Character/Grid/Tone/Light/Ink/Background/Image Export sections", () => {
     const productSectionTitles =
       appSchema.panels.controls?.sections
         .filter((section) => section.title !== "Setup")
         .map((section) => section.title) ?? [];
 
     expect(productSectionTitles).toEqual([
+      "Image",
       "Source",
       "Placement",
       "Silhouette",
@@ -101,12 +102,15 @@ describe("appSchema", () => {
   });
 
   it("enforces the two intentionally-dropped reference features (referenceFeatureInventory feature-presets/feature-video-source)", () => {
-    // Video-as-source was scoped out: source.mode has exactly the three
-    // ported modes, never a fourth video option.
+    // Video-as-source was scoped out: source.mode has exactly the two
+    // remaining media-driven modes (Scene was later dropped as a
+    // user-selectable option too), never a video option.
     const modeControl = appSchema.panels.controls?.sections
       .flatMap((section) => Object.values(section.controls))
       .find((control) => control.target === "source.mode");
-    expect(modeControl?.options?.map((option) => option.value)).toEqual(["scene", "inflate", "bitmap"]);
+    expect(modeControl?.options?.map((option) => option.value)).toEqual(["bitmap", "inflate"]);
+    // Default preview is the upload-image placeholder path, not Silhouette.
+    expect(modeControl?.defaultValue).toBe("bitmap");
 
     // Named presets were replaced by the runtime's generic Settings
     // Transfer, not an app-authored preset system: no control target

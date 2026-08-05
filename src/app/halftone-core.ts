@@ -44,6 +44,7 @@ export type Tokens = {
   lightDir: readonly [number, number, number];
   overlap: number;
   rim: number;
+  scale: number;
   sizeSteps: number;
   sizeVariation: number;
   steps: number;
@@ -67,6 +68,11 @@ export const DEFAULT_TOKENS: Tokens = {
   // --- character size axis ---
   charSize: 0.82,        // fraction of the cell a full-size glyph fills
   overlap: 0,            // extra size PAST the cell; the only way to collide
+  scale: 1,              // global multiplier on charSize; 1 = no change. Composes
+                         // on top of charSize (both clamp the *same* [0.05, 1]
+                         // cell-filling fraction, so the product can never
+                         // overflow) and on top of sizeVariation's per-cell
+                         // falloff (applied afterward, unchanged, at draw time).
   sizeVariation: 0.35,   // 0 = every glyph identical, 1 = strong size falloff
   sizeSteps: 3,          // how many discrete sizes the ramp may use
 
@@ -148,10 +154,26 @@ export function buildScaleAxis(variation: number, steps: number): number[] {
   return out;
 }
 
-/* ---------- glyph ink coverage ---------- */
+/* ---------- glyph ink coverage ----------
+   Measured at a size proportional to `sizeFraction` (the same [0.05, 1]
+   cell-filling fraction charSize/scale produce), not a fixed reference
+   size, so the measured coverage reflects how the glyph actually looks at
+   the size it will really be drawn at. Anti-aliasing/hinting don't scale
+   perfectly with area, especially for thin glyphs at small sizes, so
+   measuring at a fixed size regardless of the real render size could rank
+   glyphs in an order that no longer matches how they actually look once a
+   global scale control pushes the real size far from that fixed
+   reference -- silently shifting the tone ramp or inverting the gradient. */
 const covCache = new Map<string, number>();
-export function inkCoverage(ch: string, font: string, weight: number, makeCanvas: CanvasFactory): number {
-  const key = ch + "|" + font + "|" + weight;
+export function inkCoverage(
+  ch: string,
+  font: string,
+  weight: number,
+  makeCanvas: CanvasFactory,
+  sizeFraction = 1,
+): number {
+  const fraction = clamp(sizeFraction, 0.05, 1);
+  const key = ch + "|" + font + "|" + weight + "|" + fraction.toFixed(2);
   if (covCache.has(key)) return covCache.get(key)!;
   const N = 64;
   const c = makeCanvas(N, N);
@@ -160,7 +182,7 @@ export function inkCoverage(ch: string, font: string, weight: number, makeCanvas
   x.fillStyle = "#fff";
   x.textAlign = "center";
   x.textBaseline = "middle";
-  x.font = `${weight} ${N * 0.8}px ${font}`;
+  x.font = `${weight} ${N * 0.8 * fraction}px ${font}`;
   x.fillText(ch, N / 2, N / 2);
   const d = x.getImageData(0, 0, N, N).data;
   let sum = 0;
@@ -173,6 +195,41 @@ export function inkCoverage(ch: string, font: string, weight: number, makeCanvas
 export function fitFontSize(cellW: number, cellH: number, font: string, weight: number, makeCanvas: CanvasFactory): number {
   const f = fontFit(font, weight, makeCanvas);
   return Math.min(cellW / f.advance, cellH / f.ink);
+}
+
+/* The single [0.05, 1] "fraction of the cell-filling size" every glyph is
+   actually drawn at, before the ramp's per-cell sizeVariation scale (`s`,
+   applied afterward at draw time, unchanged) multiplies in further. Global
+   scale composes by multiplying INTO charSize before this same clamp --
+   not as a separate later multiplier -- so the product can never push a
+   glyph past "exactly fills the cell" no matter how large `scale` is. */
+export function getHalftoneEffectiveFill(charSize: number, scale: number): number {
+  return clamp(charSize * scale, 0.05, 1);
+}
+
+/* fontFit/inkCoverage cache real glyph metrics keyed by font+weight(+size),
+   measured via canvas text APIs that silently fall back to a substitute
+   font until the real one finishes loading -- so a measurement taken too
+   early can cache permanently-wrong metrics. Clearing on fonts.ready and
+   notifying listeners lets the renderer force one corrective redraw once
+   the real font is actually available, which matters most here because
+   the new global scale control depends on freshly-measured coverage at
+   whatever size it currently renders at. */
+const fontsReadyListeners = new Set<() => void>();
+
+export function onHalftoneFontsReady(listener: () => void): () => void {
+  fontsReadyListeners.add(listener);
+  return () => {
+    fontsReadyListeners.delete(listener);
+  };
+}
+
+if (typeof document !== "undefined" && document.fonts?.ready) {
+  void document.fonts.ready.then(() => {
+    fitCache.clear();
+    covCache.clear();
+    for (const listener of fontsReadyListeners) listener();
+  });
 }
 
 /* ---------- tone ramp ----------
@@ -188,9 +245,10 @@ export type Ramp = (RampPool | null)[];
 export function buildRamp(t: Tokens, makeCanvas: CanvasFactory): Ramp {
   const scales = buildScaleAxis(t.sizeVariation, t.sizeSteps);
   const chars = (t.charset && t.charset.length) ? t.charset : CHARSETS.binary;
+  const fill = getHalftoneEffectiveFill(t.charSize, t.scale);
   const combos: RampCombo[] = [];
   for (const ch of chars) {
-    const cov = inkCoverage(ch, t.font, t.weight, makeCanvas);
+    const cov = inkCoverage(ch, t.font, t.weight, makeCanvas, fill);
     for (const a of t.alphas)
       for (const s of scales)
         combos.push({ char: ch, alpha: a, scale: s, v: cov * a * s * s });

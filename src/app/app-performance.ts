@@ -32,6 +32,7 @@ function buildHeavyBaselineWorkloadFixture(target: string) {
 type SliderHardLimit = { direction: "max" | "min"; value: number };
 
 const SLIDER_WORKLOAD_HARD_LIMITS: Record<string, SliderHardLimit> = {
+  "character.scale": { direction: "min", value: 0.1 },
   "character.size": { direction: "max", value: 2.5 },
   "character.sizeSteps": { direction: "max", value: 6 },
   "character.sizeVariation": { direction: "max", value: 1 },
@@ -178,9 +179,6 @@ const ENGINE_TEST_NAME_BY_TARGET: Record<string, string> = {
   "silhouette.threshold": "engine: silhouette.threshold maps into inflate options",
   "source.image": "engine: source.image without an attached image falls back to the procedural scene",
   "source.mode": "engine: source.mode selects the effective render pipeline",
-  "source.pitch": "engine: source.pitch changes the raymarched field",
-  "source.scene": "engine: source.scene changes the raymarched field",
-  "source.yaw": "engine: source.yaw changes the raymarched field",
   "tone.backgroundCutoff": "engine: tone.backgroundCutoff maps into engine tokens",
   "tone.blackPoint": "engine: tone.blackPoint maps into engine tokens",
   "tone.dither": "engine: tone.dither maps into engine tokens",
@@ -194,7 +192,7 @@ const SELECT_STRESS_VALUE_BY_TARGET: Record<string, string> = {
   "character.mode": "pnl",
   "character.weight": "700",
   "export.image.resolution": "8k",
-  "source.mode": "bitmap",
+  "source.mode": "inflate",
 };
 
 /* getHalftoneControlConfig("source.image") already gets a media-import scenario
@@ -269,7 +267,7 @@ const RENDERER_LEVEL_SCENARIOS: readonly ToolcraftPerformanceScenario[] = [
       },
     },
     values: {
-      default: { cellAspect: 1.35, cellWidth: 16, characterSet: "binary", sizeSteps: 3, sourceMode: "scene" },
+      default: { cellAspect: 1.35, cellWidth: 16, characterSet: "binary", sizeSteps: 3, sourceMode: "bitmap" },
       max: {
         cellAspect: 0.8,
         cellWidth: 3,
@@ -278,7 +276,7 @@ const RENDERER_LEVEL_SCENARIOS: readonly ToolcraftPerformanceScenario[] = [
         sourceMedia: HEAVY_BASELINE_MEDIA,
         sourceMode: "inflate",
       },
-      min: { cellAspect: 2.2, cellWidth: 40, characterSet: "binary", sizeSteps: 1, sourceMode: "scene" },
+      min: { cellAspect: 2.2, cellWidth: 40, characterSet: "binary", sizeSteps: 1, sourceMode: "bitmap" },
     },
     workload: true,
   },
@@ -398,8 +396,6 @@ export const appPerformance: ToolcraftPerformanceConfig = defineToolcraftPerform
         invalidates: ["build-field", "rasterize-glyphs"],
         mustNotInvalidate: ["build-ramp", "decode-media", "transform-media"],
         targets: [
-          "source.yaw",
-          "source.pitch",
           "placement.zoom",
           "placement.panX",
           "placement.panY",
@@ -433,13 +429,19 @@ export const appPerformance: ToolcraftPerformanceConfig = defineToolcraftPerform
         interaction: "control-drag",
         invalidates: ["build-ramp", "rasterize-glyphs"],
         mustNotInvalidate: ["build-field", "decode-media", "transform-media"],
-        targets: ["character.variety", "character.sizeVariation", "character.sizeSteps", "tone.steps"],
+        targets: [
+          "character.variety",
+          "character.scale",
+          "character.sizeVariation",
+          "character.sizeSteps",
+          "tone.steps",
+        ],
       },
       {
         interaction: "control-change",
         invalidates: ["build-field", "rasterize-glyphs"],
         mustNotInvalidate: ["build-ramp", "decode-media", "transform-media"],
-        targets: ["source.mode", "source.scene", "placement.fit", "silhouette.invert", "silhouette.showMask"],
+        targets: ["source.mode", "placement.fit", "silhouette.invert", "silhouette.showMask"],
       },
       {
         interaction: "control-change",
@@ -511,9 +513,6 @@ export const appPerformance: ToolcraftPerformanceConfig = defineToolcraftPerform
         inputs: [
           "transform-media",
           "source.mode",
-          "source.scene",
-          "source.yaw",
-          "source.pitch",
           "placement.fit",
           "placement.zoom",
           "placement.panX",
@@ -534,9 +533,6 @@ export const appPerformance: ToolcraftPerformanceConfig = defineToolcraftPerform
         ],
         invalidatedBy: [
           "source.mode",
-          "source.scene",
-          "source.yaw",
-          "source.pitch",
           "placement.fit",
           "placement.zoom",
           "placement.panX",
@@ -690,6 +686,7 @@ export const appPerformance: ToolcraftPerformanceConfig = defineToolcraftPerform
     "character.mode",
     "character.customChars",
     "character.size",
+    "character.scale",
     "character.sizeVariation",
     "character.sizeSteps",
     "character.weight",

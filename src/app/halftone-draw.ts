@@ -3,6 +3,7 @@ import {
   buildRamp,
   clamp,
   fitFontSize,
+  getHalftoneEffectiveFill,
   hash2,
   smoothstep,
   type CanvasFactory,
@@ -55,11 +56,12 @@ export function drawHalftone(
   ctx.textBaseline = "middle";
 
   const ramp = buildRamp(t, makeCanvas);
-  // Font size is derived from measured glyph metrics, so charSize is a
-  // fraction of the cell rather than an unbounded multiplier. Overlap is
-  // the only way to exceed the cell, and it defaults to zero.
+  // Font size is derived from measured glyph metrics, so charSize (and the
+  // global scale multiplied into it) is a fraction of the cell rather than
+  // an unbounded multiplier. Overlap is the only way to exceed the cell,
+  // and it defaults to zero.
   const fitSize = fitFontSize(cellW, cellH, t.font, t.weight, makeCanvas);
-  const fill = clamp(t.charSize, 0.05, 1) + Math.max(t.overlap || 0, 0);
+  const fill = getHalftoneEffectiveFill(t.charSize, t.scale) + Math.max(t.overlap || 0, 0);
   const edge = edgeField(field);
   // one bucket per (tone level, pool slot) so font/alpha is set once each
   const buckets: number[][][] = ramp.map(pool => (pool ? pool.map(() => []) : []));

@@ -11,78 +11,60 @@ export const appSchema = defineToolcraft({
       sections: [
         {
           controls: {
-            mode: {
-              defaultValue: "scene",
-              description:
-                "Scene renders a procedural 3D form; Silhouette and Image read the uploaded image.",
-              label: "Mode",
-              options: [
-                { label: "Scene", value: "scene" },
-                { label: "Silhouette", value: "inflate" },
-                { label: "Image", value: "bitmap" },
-              ],
-              performanceReason:
-                "Switching source mode changes which per-cell field pipeline (raymarch, silhouette inflate, or image luminance) runs every redraw.",
-              performanceRole: "workload",
-              target: "source.mode",
-              type: "select",
-            },
+            /* fileDrop defaults to a standalone section layout (its own
+               dedicated block) unless it's gated by a same-section
+               control's visibleWhen -- source.image is unconditionally
+               visible now (both remaining modes need it), so it always
+               splits into its own titled "Image" section. Listing it first
+               keeps that split to a clean two-section pair (Image, then
+               Source for mode/width/height) instead of a three-way
+               Source/Image/Source split from putting it in the middle. */
             image: {
               accept: "image/*",
               assetKind: "image",
               label: "Image",
               performanceReason:
-                "Uploaded image resolution and decode cost drive the per-cell sampling pass for Silhouette and Image modes.",
+                "Uploaded image resolution and decode cost drive the per-cell sampling pass for both remaining source modes.",
               performanceRole: "workload",
               target: "source.image",
               type: "fileDrop",
-              visibleWhen: { notEquals: "scene", target: "source.mode" },
             },
-            scene: {
-              defaultValue: "stack",
-              label: "Shape",
+            mode: {
+              defaultValue: "bitmap",
+              description:
+                "Image reads the uploaded image's luminance directly; Silhouette inflates it into a lit 3D form.",
+              label: "Mode",
               options: [
-                { label: "Stack", value: "stack" },
-                { label: "Sphere", value: "sphere" },
-                { label: "Torus", value: "torus" },
-                { label: "Blob", value: "blob" },
+                { label: "Image", value: "bitmap" },
+                { label: "Silhouette", value: "inflate" },
               ],
               performanceReason:
-                "Every shape runs the same fixed-step raymarch; swapping the distance function does not change per-cell iteration count.",
-              performanceRole: "responsiveness",
-              target: "source.scene",
+                "Switching source mode changes which per-cell field pipeline (silhouette inflate or image luminance) runs every redraw.",
+              performanceRole: "workload",
+              target: "source.mode",
               type: "select",
-              visibleWhen: { equals: "scene", target: "source.mode" },
             },
-            yaw: {
-              defaultValue: 20,
-              label: "Yaw",
-              max: 90,
-              min: -90,
+            imageWidth: {
+              description:
+                "Overrides the uploaded image's real width before placement; leave blank to use its natural size.",
+              label: "Custom Width",
               performanceReason:
-                "Camera yaw re-raymarches at the same fixed per-cell cost; it does not change grid resolution or iteration count.",
+                "A larger custom source size increases per-cell sampling cost the same way a larger uploaded image would.",
               performanceRole: "responsiveness",
-              sliderValueKind: "continuous",
-              step: 1,
-              target: "source.yaw",
-              type: "slider",
-              unit: "°",
-              visibleWhen: { equals: "scene", target: "source.mode" },
+              target: "source.image.width",
+              textValueKind: "single-line",
+              type: "text",
             },
-            pitch: {
-              defaultValue: 7,
-              label: "Pitch",
-              max: 45,
-              min: -45,
+            imageHeight: {
+              description:
+                "Overrides the uploaded image's real height before placement; leave blank to use its natural size.",
+              label: "Custom Height",
               performanceReason:
-                "Camera pitch re-raymarches at the same fixed per-cell cost; it does not change grid resolution or iteration count.",
+                "A larger custom source size increases per-cell sampling cost the same way a larger uploaded image would.",
               performanceRole: "responsiveness",
-              sliderValueKind: "continuous",
-              step: 1,
-              target: "source.pitch",
-              type: "slider",
-              unit: "°",
-              visibleWhen: { equals: "scene", target: "source.mode" },
+              target: "source.image.height",
+              textValueKind: "single-line",
+              type: "text",
             },
           },
           title: "Source",
@@ -236,6 +218,7 @@ export const appSchema = defineToolcraft({
               performanceReason:
                 "Character set size changes how many (glyph, alpha, size) combinations the tone ramp measures every redraw.",
               performanceRole: "workload",
+              semanticGroup: "charset",
               target: "character.mode",
               type: "select",
             },
@@ -246,6 +229,7 @@ export const appSchema = defineToolcraft({
               performanceReason:
                 "The typed character list changes how many combinations the tone ramp measures every redraw.",
               performanceRole: "workload",
+              semanticGroup: "charset",
               target: "character.customChars",
               textValueKind: "single-line",
               type: "text",
@@ -259,6 +243,7 @@ export const appSchema = defineToolcraft({
               performanceReason:
                 "Variety only widens the tolerance used to pick among already-built ramp combinations; it does not rebuild the combination set.",
               performanceRole: "responsiveness",
+              semanticGroup: "ramp",
               sliderValueKind: "continuous",
               step: 0.01,
               target: "character.variety",
@@ -272,9 +257,23 @@ export const appSchema = defineToolcraft({
               performanceReason:
                 "Size changes the rasterized font size for every drawn glyph, changing how many pixels each fillText call covers, even though it does not change how many combinations the ramp measures.",
               performanceRole: "workload",
+              semanticGroup: "size",
               sliderValueKind: "continuous",
               step: 0.01,
               target: "character.size",
+              type: "slider",
+            },
+            scale: {
+              defaultValue: 1,
+              label: "Scale",
+              max: 1,
+              min: 0.1,
+              performanceReason:
+                "Scale multiplies into charSize before the same cell-filling clamp, so it changes the rasterized font size for every drawn glyph and forces the ramp's coverage measurement (and its sort) to re-run at the new effective size.",
+              performanceRole: "workload",
+              sliderValueKind: "continuous",
+              step: 0.01,
+              target: "character.scale",
               type: "slider",
             },
             sizeVariation: {
@@ -285,6 +284,7 @@ export const appSchema = defineToolcraft({
               performanceReason:
                 "Size variation feeds the ramp's scale axis directly, so it changes the (glyph, alpha, size) combinations the tone ramp measures and re-sorts every redraw.",
               performanceRole: "workload",
+              semanticGroup: "size",
               sliderValueKind: "continuous",
               step: 0.01,
               target: "character.sizeVariation",
@@ -298,6 +298,7 @@ export const appSchema = defineToolcraft({
               performanceReason:
                 "Size steps multiplies the number of (glyph, alpha, size) combinations the tone ramp measures every redraw.",
               performanceRole: "workload",
+              semanticGroup: "size",
               sliderValueKind: "discrete",
               step: 1,
               target: "character.sizeSteps",
@@ -316,6 +317,7 @@ export const appSchema = defineToolcraft({
               performanceReason:
                 "Font weight changes require re-measuring glyph ink coverage for every character in the active set.",
               performanceRole: "workload",
+              semanticGroup: "charset",
               target: "character.weight",
               type: "select",
             },
@@ -507,7 +509,7 @@ export const appSchema = defineToolcraft({
             },
           },
           title: "Light",
-          visibleWhen: { oneOf: ["scene", "inflate"], target: "source.mode" },
+          visibleWhen: { equals: "inflate", target: "source.mode" },
         },
         {
           controls: {

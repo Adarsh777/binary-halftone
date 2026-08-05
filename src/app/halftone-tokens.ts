@@ -68,6 +68,7 @@ export function getHalftoneTokens(values: HalftoneRuntimeValues): Tokens {
     ],
     overlap: 0,
     rim: num(values, "light.rim", 0.55),
+    scale: num(values, "character.scale", 1),
     sizeSteps: num(values, "character.sizeSteps", 3),
     sizeVariation: num(values, "character.sizeVariation", 0.35),
     steps: num(values, "tone.steps", 8),
@@ -107,9 +108,34 @@ export function getHalftonePlacement(values: HalftoneRuntimeValues): {
   };
 }
 
+/* "scene" is no longer a user-selectable mode (source.scene/yaw/pitch and
+   the Scene option were removed), but it stays a valid *internal* effective
+   mode: resolveHalftoneEffectiveMode still falls back to it whenever no
+   media is attached, matching the reference app's own no-media fallback
+   (see the feature-source-scene referenceFeatureInventory entry). Any
+   invalid/corrupted stored value also safely resolves here. */
 export function getHalftoneSourceMode(values: HalftoneRuntimeValues): "bitmap" | "inflate" | "scene" {
-  const mode = str(values, "source.mode", "scene");
+  const mode = str(values, "source.mode", "bitmap");
   return mode === "inflate" || mode === "bitmap" ? mode : "scene";
+}
+
+/* source.image.width/height are "text" controls (free-form numeric entry,
+   same as canvas.size.width/height), so their committed values are strings;
+   a blank or non-positive entry means "no override, use the media's real
+   size" rather than 0. */
+function positiveInt(values: HalftoneRuntimeValues, target: string): number | undefined {
+  const parsed = Number.parseInt(str(values, target, ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+export function getHalftoneSourceSize(values: HalftoneRuntimeValues): {
+  height?: number;
+  width?: number;
+} {
+  return {
+    height: positiveInt(values, "source.image.height"),
+    width: positiveInt(values, "source.image.width"),
+  };
 }
 
 export function getHalftoneSceneOptions(values: HalftoneRuntimeValues): {
