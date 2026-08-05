@@ -48,69 +48,95 @@ test("browser: app opens as a real Toolcraft product with the Source-to-Image Ex
   await expect(page.getByRole("button", { name: "Copy Tokens", exact: true })).toBeVisible();
 });
 
-/* Task 2 (default preview = upload-image placeholder): on first load, before
-   any upload, the product-output canvas must render the runtime-sanctioned
-   no-media fallback (the frozen engine's renderScene, via
-   resolveHalftoneEffectiveMode's hasMedia branch) -- not a blank canvas and
-   not an app-invented placeholder drawn on the canvas (forbidden by
-   component-contracts.media-custom.ts's doNotReplaceWith rules). This proves
-   the canvas has real pixel dimensions and non-uniform pixel content on a
-   fresh page load with no media attached. */
-test("browser: first load with no media renders real (non-blank) product output, not a blank canvas", async ({
-  page,
-}) => {
+// Downscales the *whole* canvas into a small sample (as
+// getToolcraftProductObservableSnapshot does) rather than cropping a
+// corner -- a corner crop can land entirely on background and read as
+// uniform even when the rest of the canvas has real rendered content
+// elsewhere.
+function sampleProductOutputCanvas(element: Element): { height: number; isUniform: boolean; width: number } {
+  const canvasElement = element as HTMLCanvasElement;
+  const { height, width } = canvasElement;
+  const sampleWidth = Math.min(64, width);
+  const sampleHeight = Math.min(64, height);
+  const sample = document.createElement("canvas");
+  sample.width = sampleWidth;
+  sample.height = sampleHeight;
+  const sampleCtx = sample.getContext("2d", { willReadFrequently: true })!;
+  sampleCtx.drawImage(canvasElement, 0, 0, sampleWidth, sampleHeight);
+  const pixels = sampleCtx.getImageData(0, 0, sampleWidth, sampleHeight).data;
+  const [firstR, firstG, firstB, firstA] = pixels;
+  let isUniform = true;
+
+  for (let index = 0; index < pixels.length; index += 4) {
+    if (
+      pixels[index] !== firstR ||
+      pixels[index + 1] !== firstG ||
+      pixels[index + 2] !== firstB ||
+      pixels[index + 3] !== firstA
+    ) {
+      isUniform = false;
+      break;
+    }
+  }
+
+  return { height, isUniform, width };
+}
+
+/* Task 2 follow-up: no media attached must render a genuinely blank canvas
+   (background fill only, uniform pixels) -- not the procedural renderScene
+   fallback (which looked like real output and confused users; see
+   feature-source-scene's acceptance row for the compliance re-read that
+   led here) and not an app-invented placeholder/text (forbidden by
+   docs/toolcraft/core/media-upload.md's Empty Source State rule and
+   component-contracts.media-custom.ts's doNotReplaceWith list -- a text
+   placard was explicitly considered and rejected for this same reason).
+   The upload-image control lives in the visible Image panel; this test
+   only proves the *canvas* itself stays neutral until real content
+   exists. */
+test("browser: first load with no media renders a blank canvas, not a procedural fallback", async ({ page }) => {
   await page.goto("/");
 
   const canvas = page.locator("[data-toolcraft-product-output]");
   await expect(canvas).toBeVisible();
 
-  // Downscale the *whole* canvas into a small sample (as
-  // getToolcraftProductObservableSnapshot does) rather than cropping a
-  // corner -- a corner crop can land entirely on background and read as
-  // uniform even when the rest of the canvas has real rendered content.
-  const sampleCanvas = (element: Element) => {
-    const canvasElement = element as HTMLCanvasElement;
-    const { height, width } = canvasElement;
-    const sampleWidth = Math.min(64, width);
-    const sampleHeight = Math.min(64, height);
-    const sample = document.createElement("canvas");
-    sample.width = sampleWidth;
-    sample.height = sampleHeight;
-    const sampleCtx = sample.getContext("2d", { willReadFrequently: true })!;
-    sampleCtx.drawImage(canvasElement, 0, 0, sampleWidth, sampleHeight);
-    const pixels = sampleCtx.getImageData(0, 0, sampleWidth, sampleHeight).data;
-    const [firstR, firstG, firstB, firstA] = pixels;
-    let isUniform = true;
+  const { isUniform } = await canvas.evaluate(sampleProductOutputCanvas);
+  expect(
+    isUniform,
+    "product-output canvas should be blank (uniform background fill) on first load, before any upload -- no procedural fallback, no invented placeholder.",
+  ).toBe(true);
 
-    for (let index = 0; index < pixels.length; index += 4) {
-      if (
-        pixels[index] !== firstR ||
-        pixels[index + 1] !== firstG ||
-        pixels[index + 2] !== firstB ||
-        pixels[index + 3] !== firstA
-      ) {
-        isUniform = false;
-        break;
-      }
-    }
+  await expect(
+    canvas,
+    "product-output canvas must not contain any text nodes (no invented placard/CTA/helper text).",
+  ).not.toContainText(/\w/);
+});
 
-    return { height, isUniform, width };
-  };
+/* Complements the blank-first-load test: the moment a real image is
+   uploaded, the blank canvas must give way to genuine, non-uniform
+   halftone output -- proving the suppression is scoped to "no media", not
+   a general regression that also blanks real content. */
+test("browser: uploading a real image replaces the blank canvas with real halftone output", async ({ page }) => {
+  await page.goto("/");
+  await selectHalftoneGateOption(page, "source.mode", "Image");
 
-  // The canvas mounts visible before its first render pass paints the
-  // no-media fallback, so poll (like every other product-observable check
-  // in this file) instead of sampling once right after toBeVisible().
+  const canvas = page.locator("[data-toolcraft-product-output]");
+  await expect(canvas).toBeVisible();
+
+  const beforeUpload = await canvas.evaluate(sampleProductOutputCanvas);
+  expect(
+    beforeUpload.isUniform,
+    "product-output canvas should still be blank before any upload in this test.",
+  ).toBe(true);
+
+  await uploadHalftoneFixtureImage(page, createGradientFixturePng());
+
   await expect(async () => {
-    const { isUniform } = await canvas.evaluate(sampleCanvas);
+    const { isUniform } = await canvas.evaluate(sampleProductOutputCanvas);
     expect(
       isUniform,
-      "product-output canvas should render real (non-blank) content via the no-media fallback on first load, before any upload",
+      "product-output canvas should render real (non-blank) halftone content once a real image is uploaded, not stay blank.",
     ).toBe(false);
   }).toPass({ timeout: 5000 });
-
-  const { height, width } = await canvas.evaluate(sampleCanvas);
-  expect(width, "product-output canvas should have real pixel dimensions on first load").toBeGreaterThan(0);
-  expect(height, "product-output canvas should have real pixel dimensions on first load").toBeGreaterThan(0);
 });
 
 /* referenceFeatureInventory feature-presets/feature-video-source document
@@ -612,6 +638,11 @@ test("browser: dragging Levels to its schema minimum (2) renders cleanly", async
 
   await page.goto("/");
   const session = await createToolcraftBrowserProofSession(page);
+  // tone.steps only affects drawn glyphs (the per-cell loop), which never
+  // runs on a blank no-media field -- real content is required for this
+  // drag to have anything to visibly change.
+  await selectHalftoneGateOption(page, "source.mode", "Image");
+  await uploadHalftoneFixtureImage(page, createGradientFixturePng());
 
   await expectToolcraftProductObservableToChange(
     session,
@@ -773,6 +804,11 @@ test("browser: export.includeBackground hides the live preview background and pr
   page,
 }) => {
   await page.goto("/");
+  // No media attached renders a genuinely blank field (no drawn glyphs at
+  // all), so there is no "real ink" coordinate to find below without real
+  // content attached first.
+  await selectHalftoneGateOption(page, "source.mode", "Image");
+  await uploadHalftoneFixtureImage(page, createGradientFixturePng());
   const toggleField = page.locator('[data-toolcraft-control-target="export.includeBackground"]');
   const toggle = toggleField.getByRole("switch");
 

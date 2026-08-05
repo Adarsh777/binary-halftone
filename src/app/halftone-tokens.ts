@@ -120,10 +120,11 @@ export function getHalftonePlacement(values: HalftoneRuntimeValues): {
 
 /* "scene" is no longer a user-selectable mode (source.scene/yaw/pitch and
    the Scene option were removed), but it stays a valid *internal* effective
-   mode: resolveHalftoneEffectiveMode still falls back to it whenever no
-   media is attached, matching the reference app's own no-media fallback
-   (see the feature-source-scene referenceFeatureInventory entry). Any
-   invalid/corrupted stored value also safely resolves here. */
+   mode: resolveHalftoneEffectiveMode still returns it whenever no media is
+   attached. Unlike the reference app, this no longer triggers a rendered
+   fallback -- buildHalftoneField returns an empty Field for it, so the
+   canvas stays blank (see the feature-source-scene referenceFeatureInventory
+   entry). Any invalid/corrupted stored value also safely resolves here. */
 export function getHalftoneSourceMode(values: HalftoneRuntimeValues): "bitmap" | "inflate" | "scene" {
   const mode = str(values, "source.mode", "bitmap");
   return mode === "inflate" || mode === "bitmap" ? mode : "scene";

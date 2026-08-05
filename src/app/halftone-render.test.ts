@@ -72,7 +72,7 @@ describe("engine: export settings are wired to real schema controls", () => {
 describe("engine: the render pipeline is deterministic for repeated calls", () => {
   it("engine: rendererPipeline recomputes deterministically for the same runtime state", () => {
     const makeCanvas = (w: number, h: number) => {
-      throw new Error(`unexpected canvas request ${w}x${h} for the scene-only pipeline`);
+      throw new Error(`unexpected canvas request ${w}x${h} for the no-media empty-field pipeline`);
     };
     const input = {
       bgCutoff: 0.045,
@@ -102,6 +102,58 @@ describe("engine: the render pipeline is deterministic for repeated calls", () =
     expect(Array.from(second.lum)).toEqual(Array.from(first.lum));
     expect(Array.from(second.alive)).toEqual(Array.from(first.alive));
   });
+});
+
+describe("engine: no media attached renders a genuinely blank field, not a procedural fallback", () => {
+  /* docs/toolcraft/core/media-upload.md's Empty Source State rule: "the
+     empty product canvas stays neutral" -- no invented placeholder, and
+     (per this session's follow-up) no procedural default either, since
+     that reference-defined exception was deliberately given up in favor
+     of a blank canvas. This proves buildHalftoneField's no-media branch
+     returns a field with every cell dead (alive=0) and zero luminance,
+     for both mode values -- not renderScene's raymarched output, which
+     would have non-zero alive cells and varied lum. A makeCanvas that
+     throws proves no image-sampling canvas work happens either. */
+  function throwingCanvas(w: number, h: number): never {
+    throw new Error(`unexpected canvas request ${w}x${h} for a no-media build`);
+  }
+
+  function noMediaInput(mode: "bitmap" | "inflate") {
+    return {
+      bgCutoff: 0.045,
+      cols: 16,
+      inflateOptions: {
+        domeRadius: 14,
+        invert: false,
+        occlusion: 0.6,
+        relief: 2.2,
+        showMask: false,
+        threshold: 0.5,
+      },
+      lightDir: [-0.45, 0.78, 0.44] as const,
+      makeCanvas: throwingCanvas,
+      media: null,
+      mode,
+      pitch: 7,
+      place: { cellAspect: 1.35, fit: "contain" as const, panX: 0, panY: 0, zoom: 0.95 },
+      rim: 0.55,
+      rows: 16,
+      scene: "stack",
+      yaw: 20,
+    };
+  }
+
+  it.each(["bitmap", "inflate"] as const)(
+    "engine: buildHalftoneField(media: null, mode: %s) returns an all-dead, zero-luminance field",
+    (mode) => {
+      const field = buildHalftoneField(noMediaInput(mode));
+
+      expect(field.W).toBe(16);
+      expect(field.H).toBe(16);
+      expect(Array.from(field.alive).every((value) => value === 0)).toBe(true);
+      expect(Array.from(field.lum).every((value) => value === 0)).toBe(true);
+    },
+  );
 });
 
 describe("engine: source.image.width/height reach placeImage without stretching the source", () => {

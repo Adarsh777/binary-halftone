@@ -190,6 +190,11 @@ export const HALFTONE_CONTROL_CONFIGS: readonly HalftoneControlConfig[] = [
   {
     kind: "select",
     label: "Character Set",
+    /* No media attached now renders a genuinely blank field (alive=0
+       everywhere -- the procedural no-media fallback was suppressed), so
+       character.* controls have nothing to visibly affect until real
+       content exists. */
+    requiresMedia: true,
     selectHeaviestOptionLabel: "P&L",
     selectOptionLabel: "Digits",
     target: "character.mode",
@@ -199,10 +204,18 @@ export const HALFTONE_CONTROL_CONFIGS: readonly HalftoneControlConfig[] = [
     kind: "text",
     label: "Custom Characters",
     requiresCharacterMode: "custom",
+    requiresMedia: true,
     target: "character.customChars",
     workload: true,
   },
-  { kind: "slider", label: "Variety", sliderStressRatio: 0.9, target: "character.variety", workload: false },
+  {
+    kind: "slider",
+    label: "Variety",
+    requiresMedia: true,
+    sliderStressRatio: 0.9,
+    target: "character.variety",
+    workload: false,
+  },
   {
     kind: "slider",
     label: "Size",
@@ -213,6 +226,7 @@ export const HALFTONE_CONTROL_CONFIGS: readonly HalftoneControlConfig[] = [
        identically at the clamp ceiling. A ratio below the clamp boundary
        ((1-0.3)/2.2 ~= 0.318) is required to prove a real, visible change. */
     primarySliderRatio: 0.1,
+    requiresMedia: true,
     sliderStressRatio: 0.95,
     target: "character.size",
     workload: true,
@@ -228,6 +242,7 @@ export const HALFTONE_CONTROL_CONFIGS: readonly HalftoneControlConfig[] = [
        not-yet-seen size fraction, making it the real "heaviest" workload
        case for this control (not the largest number). */
     primarySliderRatio: 0.4,
+    requiresMedia: true,
     sliderStressRatio: 0.05,
     target: "character.scale",
     workload: true,
@@ -235,11 +250,19 @@ export const HALFTONE_CONTROL_CONFIGS: readonly HalftoneControlConfig[] = [
   {
     kind: "slider",
     label: "Size Variation",
+    requiresMedia: true,
     sliderStressRatio: 0.95,
     target: "character.sizeVariation",
     workload: true,
   },
-  { kind: "slider", label: "Size Steps", sliderStressRatio: 0.95, target: "character.sizeSteps", workload: true },
+  {
+    kind: "slider",
+    label: "Size Steps",
+    requiresMedia: true,
+    sliderStressRatio: 0.95,
+    target: "character.sizeSteps",
+    workload: true,
+  },
   {
     kind: "select",
     label: "Weight",
@@ -249,6 +272,7 @@ export const HALFTONE_CONTROL_CONFIGS: readonly HalftoneControlConfig[] = [
        face. "Medium" (the reference's mid-range default choice) cannot
        prove a real rendered-output change; Bold is both the heaviest and
        the only visually-provable non-default weight. */
+    requiresMedia: true,
     selectHeaviestOptionLabel: "Bold",
     selectOptionLabel: "Bold",
     target: "character.weight",
@@ -275,12 +299,54 @@ export const HALFTONE_CONTROL_CONFIGS: readonly HalftoneControlConfig[] = [
     target: "tone.backgroundCutoff",
     workload: false,
   },
-  { kind: "slider", label: "Levels", sliderStressRatio: 0.95, target: "tone.steps", workload: true },
-  { kind: "slider", label: "Black Point", sliderStressRatio: 0.9, target: "tone.blackPoint", workload: false },
-  { kind: "slider", label: "White Point", sliderStressRatio: 0.9, target: "tone.whitePoint", workload: false },
-  { kind: "slider", label: "Gamma", sliderStressRatio: 0.9, target: "tone.gamma", workload: false },
-  { kind: "slider", label: "Dither", sliderStressRatio: 0.9, target: "tone.dither", workload: false },
-  { kind: "slider", label: "Edge Lift", sliderStressRatio: 0.9, target: "tone.edgeLift", workload: false },
+  {
+    kind: "slider",
+    label: "Levels",
+    requiresMedia: true,
+    sliderStressRatio: 0.95,
+    target: "tone.steps",
+    workload: true,
+  },
+  {
+    kind: "slider",
+    label: "Black Point",
+    requiresMedia: true,
+    sliderStressRatio: 0.9,
+    target: "tone.blackPoint",
+    workload: false,
+  },
+  {
+    kind: "slider",
+    label: "White Point",
+    requiresMedia: true,
+    sliderStressRatio: 0.9,
+    target: "tone.whitePoint",
+    workload: false,
+  },
+  {
+    kind: "slider",
+    label: "Gamma",
+    requiresMedia: true,
+    sliderStressRatio: 0.9,
+    target: "tone.gamma",
+    workload: false,
+  },
+  {
+    kind: "slider",
+    label: "Dither",
+    requiresMedia: true,
+    sliderStressRatio: 0.9,
+    target: "tone.dither",
+    workload: false,
+  },
+  {
+    kind: "slider",
+    label: "Edge Lift",
+    requiresMedia: true,
+    sliderStressRatio: 0.9,
+    target: "tone.edgeLift",
+    workload: false,
+  },
 
   {
     kind: "slider",
@@ -331,7 +397,17 @@ export const HALFTONE_CONTROL_CONFIGS: readonly HalftoneControlConfig[] = [
     workload: false,
   },
 
-  { kind: "color", label: "Ink", target: "appearance.ink", workload: false },
+  {
+    kind: "color",
+    label: "Ink",
+    /* ctx.fillStyle = t.ink only applies inside the per-cell glyph draw
+       loop (idx > 0), which never runs on a blank no-media field --
+       unlike appearance.background's unconditional fillRect, ink has
+       nothing to color without real content. */
+    requiresMedia: true,
+    target: "appearance.ink",
+    workload: false,
+  },
   { kind: "color", label: "Background", target: "appearance.background", workload: false },
   { kind: "switch", label: "Include", target: "export.includeBackground", workload: false },
   { kind: "switch", label: "Reverse theme", target: "appearance.themeReversed", workload: false },

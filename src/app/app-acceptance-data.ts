@@ -21,7 +21,7 @@ export const appTransferMode: ToolcraftTransferMode = {
     {
       acceptanceId: "source.mode",
       behaviorEvidence:
-        "renderScene(W,H,{scene,yaw,pitch,rim,lightDir}) in src/app/halftone.ts is unchanged from src/halftone.js; only type annotations were added. It is no longer reachable through a user-selectable dial, but resolveHalftoneEffectiveMode(mode, hasMedia) still returns 'scene' whenever hasMedia is false, so it stays the automatic no-media fallback -- the same dual role App.jsx itself gave it ('when source.mode === scene OR no media was loaded').",
+        "renderScene(W,H,{scene,yaw,pitch,rim,lightDir}) in src/app/halftone.ts is unchanged from src/halftone.js; only type annotations were added -- the frozen engine function itself was never touched. It is no longer reachable from the live product at all: buildHalftoneField() (halftone-field.ts) no longer calls it under any condition, including the no-media case. With no media attached, buildHalftoneField returns an empty Field (alive all zero) instead, so drawHalftone's per-cell loop draws nothing and only the background fill shows.",
       featureName: "Procedural scene source (raymarched sphere/torus/blob/stack)",
       id: "feature-source-scene",
       referenceBehavior:
@@ -29,9 +29,9 @@ export const appTransferMode: ToolcraftTransferMode = {
       sourceEvidence: "App.jsx lines ~90-96, 229-236; src/halftone.js renderScene()/makeMap().",
       status: "intentionally-changed",
       toolcraftMapping:
-        "The user-selectable Scene mode and its scene/yaw/pitch dials were removed from the schema; renderScene() remains wired only as buildHalftoneField()'s no-media fallback (via resolveHalftoneEffectiveMode), fixed at the reference's default scene/yaw/pitch values (stack/20/7) since there are no controls left to vary them.",
+        "The user-selectable Scene mode and its scene/yaw/pitch dials were removed from the schema (unchanged from the prior decision). The no-media dual-role fallback that made renderScene() a compliant default -- allowed under docs/toolcraft/core/media-upload.md's Empty Source State rule only because the reference explicitly defined it -- has now also been given up: the empty product canvas stays neutral per that same rule's default requirement instead. renderScene()/halftone-scene.ts remain byte-for-byte unchanged in the frozen engine; they are simply unreferenced by the live render path now.",
       userApprovedChangeReason:
-        "Explicit user instruction for this migration: drop the procedural Scene source mode as a user-selectable option (and its scene/yaw/pitch dials, confirmed scene-only via buildHalftoneField's dispatch) so the product always starts from an uploaded image, while keeping the frozen engine's renderScene/SDF code in place since it stays referenced as the existing no-media fallback -- not rewriting engine algorithm code to remove it.",
+        "Explicit user follow-up instruction: the no-media procedural fallback was confusing users (it renders a real-looking shape that isn't the uploaded content), so it is suppressed outright rather than kept as the reference-defined default. Confirmed via direct doc/contract re-read that a blank neutral canvas -- not invented placeholder text -- is the compliant replacement (a text placard was considered and explicitly rejected as a banned 'CTA copy/helper text' invention); not rewriting engine algorithm code to make this change, only the app-owned buildHalftoneField call site.",
     },
     {
       acceptanceId: "silhouette.threshold",
@@ -262,7 +262,7 @@ export const appControlSectionInventory: readonly ToolcraftControlSectionInvento
   {
     entity: "Light",
     groupingReason:
-      "Rim and the XYZ light direction feed the shade() call the silhouette dome uses to light its normals; hidden for the bitmap source, which has no normals. The same shade() call also lights the no-media fallback scene, but that fallback has no visible mode to select it through, so Light is scoped to inflate only.",
+      "Rim and the XYZ light direction feed the shade() call the silhouette dome uses to light its normals; hidden for the bitmap source, which has no normals. The same shade() call also lights renderScene's frozen SDF scenes, but that code path is unreferenced by the live product now (no media renders a blank canvas, not a procedural fallback), so Light is scoped to inflate only.",
     targets: ["light.rim", "light.dirX", "light.dirY", "light.dirZ"],
     title: "Light",
     workflowStage: "lighting",

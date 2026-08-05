@@ -3,7 +3,6 @@ import {
   fieldFromImage,
   inflate,
   readKeyField,
-  renderScene,
   srcDims,
   type CanvasFactory,
   type Field,
@@ -165,8 +164,18 @@ export type HalftoneFieldInput = {
   pitch: number;
 };
 
-/* No stable media source falls back to the procedural scene, matching the
-   reference app's `const mode = media ? p.source.mode : "scene"`. */
+/* No stable media source keeps the effective mode distinct from the real
+   selected mode (still called "scene" for HalftoneSourceMode's own type
+   compatibility -- see getHalftoneSourceMode's invalid-value fallback),
+   but buildHalftoneField below no longer renders anything for it: the
+   empty product canvas must stay neutral per
+   docs/toolcraft/core/media-upload.md's Empty Source State rule
+   ("Do not invent canvas placeholder artwork ... or agent-made source
+   preset before real content exists"). The reference app's own
+   `no media -> renderScene` dual role was the one narrow exception that
+   rule allows (an explicitly-defined default source, recorded as
+   evidence) -- that exception is deliberately given up here in favor of a
+   blank canvas; see feature-source-scene's acceptance row. */
 export function resolveHalftoneEffectiveMode(
   mode: HalftoneSourceMode,
   hasMedia: boolean,
@@ -174,28 +183,26 @@ export function resolveHalftoneEffectiveMode(
   return hasMedia ? mode : "scene";
 }
 
+function emptyHalftoneField(cols: number, rows: number): Field {
+  return {
+    alive: new Uint8Array(cols * rows),
+    dep: null,
+    H: rows,
+    lum: new Float32Array(cols * rows),
+    W: cols,
+  };
+}
+
 export function buildHalftoneField(input: HalftoneFieldInput): Field {
   const effectiveMode = resolveHalftoneEffectiveMode(input.mode, input.media !== null);
 
   if (effectiveMode === "scene") {
-    return renderScene(input.cols, input.rows, {
-      lightDir: input.lightDir,
-      pitch: (input.pitch * Math.PI) / 180,
-      rim: input.rim,
-      scene: input.scene,
-      yaw: (input.yaw * Math.PI) / 180,
-    });
+    return emptyHalftoneField(input.cols, input.rows);
   }
 
   const media = input.media;
   if (!media) {
-    return renderScene(input.cols, input.rows, {
-      lightDir: input.lightDir,
-      pitch: (input.pitch * Math.PI) / 180,
-      rim: input.rim,
-      scene: input.scene,
-      yaw: (input.yaw * Math.PI) / 180,
-    });
+    return emptyHalftoneField(input.cols, input.rows);
   }
 
   if (effectiveMode === "inflate") {

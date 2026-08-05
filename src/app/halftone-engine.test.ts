@@ -72,10 +72,10 @@ function createFakeCanvasFactory(): CanvasFactory {
    mode and its dials were removed as a user-selectable option (they were
    confirmed scene-only -- inflate() never receives pitch/yaw), so there is
    no schema control left for these to prove reaches the engine. renderScene
-   itself is unchanged and stays referenced as buildHalftoneField's no-media
-   fallback at its fixed default scene/yaw/pitch values; that fallback's
-   determinism is covered by "engine: rendererPipeline recomputes
-   deterministically for the same runtime state" in halftone-render.test.ts. */
+   itself is unchanged (frozen engine, untouched) but is no longer called
+   from buildHalftoneField at all -- no media now renders a genuinely blank
+   field, proved in halftone-render.test.ts's "no media attached renders a
+   genuinely blank field, not a procedural fallback". */
 
 const baseSceneOptions: SceneOptions = {
   lightDir: [-0.45, 0.78, 0.44],
@@ -597,17 +597,25 @@ describe("engine: source mode selects the effective render pipeline", () => {
     expect(getHalftoneSourceMode({})).toBe("bitmap");
   });
 
-  it("engine: source.image without an attached image falls back to the procedural scene", () => {
+  it("engine: source.image without an attached image resolves to the internal no-media marker mode", () => {
+    /* "scene" here is purely an internal marker value distinguishing
+       "no media" from a real selected mode -- it no longer causes
+       buildHalftoneField to render anything (see halftone-render.test.ts's
+       "no media attached renders a genuinely blank field" for that proof).
+       This only proves resolveHalftoneEffectiveMode's own mapping. */
     expect(resolveHalftoneEffectiveMode("inflate", false)).toBe("scene");
     expect(resolveHalftoneEffectiveMode("bitmap", false)).toBe("scene");
     expect(resolveHalftoneEffectiveMode("inflate", true)).toBe("inflate");
   });
 
-  it("engine: the no-media fallback scene uses fixed default scene/yaw/pitch values", () => {
+  it("engine: getHalftoneSceneOptions still resolves fixed defaults, though buildHalftoneField no longer consumes them", () => {
     /* source.scene/yaw/pitch no longer exist as controls, so state.values
        can never carry these keys -- getHalftoneSceneOptions always falls
-       back to the reference's original defaults (stack/20/7) for the
-       no-media scene render. */
+       back to the reference's original defaults (stack/20/7). This
+       function and its output are still wired into HalftoneFieldInput
+       (halftone-render.ts), but buildHalftoneField's no-media branch no
+       longer reads pitch/scene/yaw at all -- they are inert now that the
+       procedural fallback is suppressed, not a live render input. */
     expect(getHalftoneSceneOptions({})).toEqual({ pitch: 7, scene: "stack", yaw: 20 });
     expect(getHalftoneSceneOptions({ "character.mode": "pnl" })).toEqual({
       pitch: 7,
